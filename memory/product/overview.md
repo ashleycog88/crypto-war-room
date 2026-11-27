@@ -40,6 +40,9 @@ A free, always-on, fail-safe Python bot on GitHub Actions that scans the top 50 
   - [phase1/requirement.md](phase1/requirement.md)
   - [phase1/journeys.md](phase1/journeys.md)
 - Phase 2 → 3-month backtest of the exact live rules; results + recommendations in plain words → F-12 (proof), F-20, F-21, F-22
+  - [phase2/requirement.md](phase2/requirement.md)
+  - [phase2/journeys.md](phase2/journeys.md)
+  - Phase 1 status: DONE, tested (82 builder tests + independent tester 9/9), saved to GitHub main 2026-11-27 20:25 UTC; diagnostics run succeeded; first v10 run started 20:28 UTC.
 - Phase 3 → edge watchers (news, whale trades, smart-money wallets), forward-tested → F-23
 - Phase 4 → apply the user's chosen rules / coins / hold times; re-verify; final guide → F-24, F-25
 

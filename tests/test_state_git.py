@@ -85,7 +85,7 @@ def test_jrn29_crash_after_trade_open(tmp_path, monkeypatch):
     script = tmp_path / "crash.py"
     script.write_text(CRASH.format(root=ROOT, tests=os.path.join(ROOT, "tests"), now=now))
     env = dict(os.environ, STATE_FILE=str(sp), TELEGRAM_BOT_TOKEN="123456789:FAKEtokenFAKEtokenFAKEtoken123",
-               TELEGRAM_CHAT_ID="-1009876543210")
+               TELEGRAM_CHAT_ID="-1009876543210", MIN_TP1_FEE_MULT="0")
     r = subprocess.run([sys.executable, str(script)], env=env, capture_output=True, text=True, timeout=60)
     assert r.returncode == -signal.SIGKILL, r.stdout + r.stderr
     st = json.loads(sp.read_text())
@@ -96,11 +96,12 @@ def test_jrn29_crash_after_trade_open(tmp_path, monkeypatch):
     rec = TGRecorder()
     monkeypatch.setattr(wr, "_http_post", rec)
     cfg = wr.Config()
+    cfg.min_tp1_fee_mult = 0
     spot = FakeSpot(pairs=["BTC/USDT"], now=now + 60)
     install_scores(monkeypatch, spot, {"BTC/USDT": (85, 0)})
     bot = make_bot(cfg, spot)
     bot.cycle(now=now + 60)
-    assert rec.texts("A-GRADE") == [] and len(bot.state["active_trades"]) == 1
+    assert rec.texts("A-GRADE ·") == [] and len(bot.state["active_trades"]) == 1
 
 
 def git(cwd, *args):

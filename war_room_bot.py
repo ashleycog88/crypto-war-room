@@ -31,6 +31,7 @@ AI_BUDGET_S = 30
 AI_MAX_PER_MIN = 8
 AI_MIN_GAP_S = 4
 AI_BACKOFF_S = 300
+CYCLE_AI_BUDGET_S = 35  # latest second (from cycle start) at which an AI review may still start
 TG_GAP_S = 1.05
 TG_LIMIT = 4096
 COOLDOWN_S = 3600
@@ -39,6 +40,9 @@ SL_ATR, TP1_ATR, TP2_ATR = 1.8, 2.0, 3.6
 CHECKPOINT_S = 900
 CLOSED_CAP = 1000
 WATCHDOG_MAX_AGE_S = 7200
+OB_PENALTY = int(float(os.environ.get("OB_PENALTY") or 15))  # points removed when the order book leans >=15% against the side (env OB_PENALTY, 0 = off)
+MIN_TP1_FEE_MULT = 3  # TP1 distance must be >= this x round-trip fee (env MIN_TP1_FEE_MULT, 0 = off)
+STATE_KEEP_S = 48 * 3600
 
 ORIGINAL_8 = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "DOGE/USDT", "AVAX/USDT", "LINK/USDT"]
 BUILTIN_COINS = ORIGINAL_8 + [f"{c}/USDT" for c in (
@@ -125,6 +129,7 @@ class Config:
         self.top_n = env_num("TOP_N_COINS", 50, int)
         self.exclude_coins = {c.strip().upper().split("/")[0] for c in env_str("EXCLUDE_COINS").split(",") if c.strip()}
         self.use_deriv = env_str("USE_DERIV_SCORE") == "1"
+        self.min_tp1_fee_mult = env_num("MIN_TP1_FEE_MULT", MIN_TP1_FEE_MULT)
         self.healthcheck_url = env_str("HEALTHCHECK_URL")
         self.msg_prefix = env_str("MSG_PREFIX")
         self.tg_max_sends = env_num("TG_MAX_SENDS", 0, int)
@@ -202,8 +207,10 @@ def ob_imbalance(ob, depth=20):
     return (bv - av) / (bv + av) if (bv + av) > 0 else 0.0
 
 
-def score_sides(r5, r1, ob_imb):
-    """Base score (weights 25/25/20/15/15) from the last CLOSED 5m row r5 and 1h row r1 (dict-like)."""
+def score_sides(r5, r1, ob_imb, ob_penalty=None):
+    """Base score (weights 25/25/20/15/15) from the last CLOSED 5m row r5 and 1h row r1 (dict-like).
+    An order book leaning >=15% against a side costs that side ob_penalty points (floor 0)."""
+    pen = OB_PENALTY if ob_penalty is None else ob_penalty
     ls = ss = 0
     rl, rs = [], []
     if r1["close"] > r1["ema21"] > r1["ema50"]:
@@ -229,6 +236,10 @@ def score_sides(r5, r1, ob_imb):
         ls += 15; rl.append(f"Bid Wall +{ob_imb * 100:.0f}%")
     elif ob_imb <= -0.15:
         ss += 15; rs.append(f"Ask Wall {ob_imb * 100:.0f}%")
+    if pen and ob_imb >= 0.15:
+        ss = max(0, ss - pen); rs.append("⚠️ order book against this trade")
+    elif pen and ob_imb <= -0.15:
+        ls = max(0, ls - pen); rl.append("⚠️ order book against this trade")
     return ls, ss, rl, rs
 
 
@@ -269,6 +280,19 @@ def deriv_adjustment(direction, funding8h, oi_chg, px_chg_1h, regime):
     elif regime == against:
         return -10
     return min(adj, 10)
+
+
+def is_pegged(price, df1h):
+    """Stable-like coin: price within 0.97-1.03 and the last 24 closed 1h candles span < 1.5%."""
+    if not (0.97 <= price <= 1.03) or df1h is None or len(df1h) < 24:
+        return False
+    w = df1h.iloc[-24:]
+    return (float(w["high"].max()) - float(w["low"].min())) / price * 100 < 1.5
+
+
+def tp1_too_small(direction, entry, tp1, fee_spot, fee_fut, mult=None):
+    m = MIN_TP1_FEE_MULT if mult is None else mult
+    return bool(m) and abs(tp1 - entry) / entry * 100 < m * fee_round_trip(direction, fee_spot, fee_fut) - 1e-9
 
 
 def sig(x, digits=8):
@@ -381,6 +405,16 @@ def resolve_trade(t, candles, live_price, now_s, max_hold_h, fee_spot=0.10, fee_
         gross = 0.5 * pct_move(t["dir"], t["entry"], t["tp1"]) + 0.5 * p_now if t.get("tp1_hit") else p_now
         events.append(_close(t, "TIME EXIT", px, gross, now_s, fee_spot, fee_fut))
     return events
+
+
+def recompute_totals(closed):
+    tot = {g: {"w": 0, "l": 0, "net_sum": 0.0} for g in ("A", "B")}
+    for t in closed:
+        if isinstance(t, dict) and "net" in t and t.get("grade") in tot and not t.get("exclude_from_scoreboard") \
+                and not t.get("legacy"):
+            tot[t["grade"]]["w" if t["net"] > 0 else "l"] += 1
+            tot[t["grade"]]["net_sum"] = round(tot[t["grade"]]["net_sum"] + t["net"], 4)
+    return tot
 
 
 def record_line(totals):
@@ -708,16 +742,31 @@ class AIReviewer:
             return ""
         return (res.choices[0].message.content or "").strip()
 
-    def review(self, setup):
-        """Return (verdict, note). verdict: APPROVED | REJECTED | UNCLEAR | UNAVAILABLE."""
+    def throttle_wait(self, now):
+        """Seconds until the bot's own AI throttle allows the next call (0 = now)."""
+        self.calls = [t for t in self.calls if now - t < 60]
+        wait = 0.0
+        if self.calls:
+            wait = max(wait, self.calls[-1] + AI_MIN_GAP_S - now)
+        if len(self.calls) >= AI_MAX_PER_MIN:
+            wait = max(wait, self.calls[-AI_MAX_PER_MIN] + 60 - now)
+        return max(0.0, wait)
+
+    def review(self, setup, start_by=None):
+        """Return (verdict, note). verdict: APPROVED | REJECTED | UNCLEAR | UNAVAILABLE | DEFER.
+        The bot's own throttle never skips a review: it waits for the next slot, or returns DEFER when that
+        slot is later than start_by (the caller retries next cycle)."""
         if not self.cfg.llm_key:
             return "UNAVAILABLE", "AI unavailable (no key)"
         now = time.time()
         if now < self.backoff_until:
             return "UNAVAILABLE", "AI unavailable (rate-limited, pausing)"
-        self.calls = [t for t in self.calls if now - t < 60]
-        if len(self.calls) >= AI_MAX_PER_MIN or (self.calls and now - self.calls[-1] < AI_MIN_GAP_S):
-            return "UNAVAILABLE", "AI unavailable (throttled)"
+        wait = self.throttle_wait(now)
+        if wait > 0:
+            if start_by is not None and now + wait > start_by:
+                return "DEFER", "waiting for an AI slot"
+            _sleep(wait)
+            now = time.time()
         deadline = now + AI_BUDGET_S
         prompt = build_ai_prompt(setup)
         rate_limited = False
@@ -728,6 +777,9 @@ class AIReviewer:
                 break
             try:
                 txt = self._call(model, prompt, min(AI_TIMEOUT_S, remaining))
+                if txt and parse_ai_reply(txt)[0] == "UNCLEAR" and deadline - time.time() > 1:
+                    txt = self._call(model, prompt + " Reply with EXACTLY 'APPROVED: <reason>' or 'REJECTED: "
+                                     "<reason>' and nothing else.", min(AI_TIMEOUT_S, deadline - time.time())) or txt
                 if txt:
                     verdict, note = parse_ai_reply(txt)
                     self.stats["ok"] += 1
@@ -797,6 +849,13 @@ class BinanceSpot:
         if "BTCUSDT" not in self.markets:
             raise RuntimeError("BTCUSDT not listed")
 
+        try:
+            t0 = time.time()
+            server = self._get("/api/v3/time")["serverTime"]
+            self.time_offset_ms = int(server - (t0 + time.time()) / 2 * 1000)
+        except Exception:
+            self.time_offset_ms = 0
+
     def has(self, sym):
         return sym.replace("/", "") in self.markets
 
@@ -846,8 +905,7 @@ class CcxtSpot:
         try:
             t = self.ex.fetch_tickers(syms)
         except Exception:
-            with ThreadPoolExecutor(4) as p:
-                t = dict(zip(syms, p.map(lambda s: self._safe_ticker(s), syms)))
+            t = {s: self._safe_ticker(s) for s in syms}
         return {s: float(t[s]["last"]) for s in syms if t.get(s) and t[s].get("last")}
 
     def _safe_ticker(self, s):
@@ -1082,39 +1140,105 @@ def market_label(direction, unverified=False):
     return "Futures only" + (" (perp listing unverified)" if unverified else "")
 
 
-def format_alert(s, exchange, ai_note, max_hold_h, deriv_src):
-    g = s["grade"]
-    icon = "🟢" if s["dir"] == "LONG" else "🔴"
-    src = "" if exchange == "BINANCE" else f" · data: {esc(exchange)}"
-    adj = f" (deriv adj {s['deriv_adj']:+d} applied)" if s.get("deriv_applied") else ""
+def fmt_price(x):
+    """Human price: thousands separators, decimals by size (3,450.20 · 141.23 · 1.2345 · 0.0004567)."""
+    x = float(x)
+    if x >= 100:
+        return f"{x:,.2f}"
+    if x >= 1:
+        return f"{x:,.4f}"
+    if x <= 0:
+        return f"{x:g}"
+    return f"{x:.{3 - math.floor(math.log10(x))}f}"
+
+
+def coin_name(sym):
+    return sym.split("/")[0]
+
+
+PLAIN_REASONS = [("1H Bull", "1h uptrend"), ("1H Bear", "1h downtrend"), ("5M EMA+VWAP Bull", "5m momentum up"),
+                 ("5M EMA+VWAP Bear", "5m momentum down"), ("RSI Bull", "healthy buying strength"),
+                 ("RSI Bear", "healthy selling pressure"), ("Vol", "high volume"),
+                 ("Bid Wall", "more buyers than sellers waiting"), ("Ask Wall", "more sellers than buyers waiting")]
+
+
+def plain_reasons(reasons):
+    out = []
+    for r in reasons:
+        out.append(next((p for k, p in PLAIN_REASONS if r.startswith(k)), r))
+    return ", ".join(dict.fromkeys(out))
+
+
+def ai_line(verdict, note):
+    if verdict == "UNAVAILABLE":
+        return f"🤖 {esc(note)} — use your own judgement"
+    text = re.sub(r"^\s*(AI:\s*)?(APPROVED|REJECTED)\s*[:\-–]?\s*", "", note or "", flags=re.I).strip()
+    if verdict == "APPROVED":
+        return f"🤖 AI: ✅ looks good — “{esc(text)}”"
+    return f"🤖 AI: 🤔 “{esc(text)}”"
+
+
+def format_alert(s, exchange, ai_verdict, ai_note, max_hold_h, deriv_src):
+    long_ = s["dir"] == "LONG"
+    g, coin, e = s["grade"], esc(coin_name(s["symbol"])), s["price"]
+    mood = "strong setup" if g == "A" else "okay setup"
+    head = f"🟢 <b>BUY {coin}</b>" if long_ else f"🔴 <b>SHORT (SELL) {coin}</b>"
+    where = ("Binance Spot or Futures" if long_ else "Binance Futures only (you profit if the price falls)")
+    if not long_ and "unverified" in s.get("market", ""):
+        where += " — check the coin has futures"
+    pc = lambda px: f"{(px - e) / e * 100:+.1f}%"
+    verb = "sell" if long_ else "close"
+    details = [f"data {esc(exchange.title())}"] if exchange != "BINANCE" else []
+    details += [f"Funding {esc(fmt_funding(s.get('funding8h')))}", f"OI {esc(fmt_oi(s.get('oi_chg_1h')))}",
+                f"BTC trend {esc(s.get('btc_regime', 'n/a'))}" + (f" via {esc(deriv_src.title())}" if deriv_src else "")]
+    if s.get("deriv_applied") and s.get("deriv_adj"):
+        details.append(f"deriv bonus {s['deriv_adj']:+d}")
     lines = [
-        f"{icon} <b>{g}-GRADE {s['score']}/100</b> · <b>{esc(s['symbol'])} {s['dir']}</b>{src}",
-        f"🏷 Market: <b>{esc(s.get('market', market_label(s['dir'])))}</b>",
-        f"🎯 Entry: <code>{esc(s['price'])}</code> | 🛑 SL: <code>{esc(s['sl'])}</code>",
-        f"💰 TP1: <code>{esc(s['tp1'])}</code> | 🚀 TP2: <code>{esc(s['tp2'])}</code>",
-        f"📈 RSI 5m/1h: {esc(s['rsi5'])}/{esc(s['rsi1h'])} | Vol: {esc(s['vol'])}x | OB: {s['ob']:+.0f}%",
-        f"✅ {esc(', '.join(s['reasons']))}{adj}",
-        f"📊 Funding {esc(fmt_funding(s.get('funding8h')))} | OI {esc(fmt_oi(s.get('oi_chg_1h')))} | "
-        f"BTC {esc(s.get('btc_regime', 'n/a'))} ({esc(deriv_src or 'none')})",
-        f"⏱ Max hold {esc(f'{max_hold_h:g}')}h · TP1 banks half, then SL → entry",
-        f"🧠 {esc(ai_note)}",
+        f"{head} · {g}-GRADE · {mood} ({s['score']}/100)",
+        f"Where: {where}",
+        f"1️⃣ {'Buy' if long_ else 'Short'} now near: <b>{fmt_price(e)}</b>",
+        f"2️⃣ Stop loss: <b>{fmt_price(s['sl'])}</b> ({pc(s['sl'])}) — "
+        f"{'sell if price drops here' if long_ else 'close if price RISES here'}",
+        f"3️⃣ Take profit 1: <b>{fmt_price(s['tp1'])}</b> ({pc(s['tp1'])}) → {verb} HALF",
+        f"4️⃣ Take profit 2: <b>{fmt_price(s['tp2'])}</b> ({pc(s['tp2'])}) → {verb} the REST",
+        f"⏰ Close the trade after {max_hold_h:g} hours if nothing hits",
+        ai_line(ai_verdict, ai_note),
+        f"ℹ️ Why: {esc(plain_reasons(s['reasons']))}",
+        f"<i>{' · '.join(details)}</i>",
     ]
     return "\n".join(lines)
 
 
 def format_tp1(t, ev):
-    return (f"🎯 <b>TP1 HIT</b> · {esc(t['symbol'])} {t['dir']} ({t['grade']}-GRADE)\n"
-            f"Half banked at <code>{esc(sig(ev['price']))}</code> ({ev['gross_half']:+.2f}% gross on that half).\n"
-            f"<b>SL moved to breakeven</b> (<code>{esc(t['entry'])}</code>). Runner targets TP2 "
-            f"<code>{esc(t['tp2'])}</code>.")
+    long_ = t["dir"] == "LONG"
+    return (f"✅ <b>TP1 HIT</b> · {esc(coin_name(t['symbol']))} reached Take profit 1!\n"
+            f"👉 {'Sell' if long_ else 'Close'} HALF now ({ev['gross_half']:+.2f}%).\n"
+            f"👉 Move your stop loss to <b>{fmt_price(t['entry'])}</b> (your entry price) — this trade can't lose "
+            f"money now.\nNext target: <b>{fmt_price(t['tp2'])}</b> (Take profit 2)")
+
+
+PLAIN_EXIT = {"STOP LOSS": "hit stop loss", "TP2 HIT": "hit Take profit 2",
+              "BREAKEVEN after TP1": "came back to entry after TP1 (half was already sold at TP1)",
+              "TIME EXIT": "time limit reached"}
+
+
+def scoreboard(totals):
+    parts = []
+    for g in ("A", "B"):
+        w, l = totals[g]["w"], totals[g]["l"]
+        pct = f"{w / (w + l) * 100:.0f}%" if (w + l) else "no trades yet"
+        parts.append(f"{g}-grade: {w} win{'s' * (w != 1)} · {l} loss{'es' * (l != 1)} ({pct})")
+    return " | ".join(parts)
 
 
 def format_close(t, ev, totals):
-    icon = "✅" if ev["win"] else "🛑"
-    return (f"{icon} <b>CLOSED {esc(t['symbol'])} {t['dir']}</b> ({t['grade']}-GRADE)\n"
-            f"Exit: <b>{esc(ev['reason'])}</b> at <code>{esc(sig(ev['exit']))}</code>\n"
-            f"Net PnL: <b>{ev['net']:+.2f}%</b> after fees (gross {ev['gross']:+.2f}%)\n"
-            f"Record (net): {esc(record_line(totals))}")
+    side = "buy" if t["dir"] == "LONG" else "short"
+    res = f"✅ WIN {ev['net']:+.2f}%" if ev["win"] else f"❌ LOSS {ev['net']:+.2f}%"
+    return (f"🏁 <b>{esc(coin_name(t['symbol']))} {side} trade finished — {res}</b> after fees ({t['grade']}-GRADE)\n"
+            f"Reason: {esc(PLAIN_EXIT.get(ev['reason'], ev['reason']))}\n"
+            + ("⚠️ This trade was not AI-checked, so it is not counted on the scoreboard.\n"
+               if t.get("exclude_from_scoreboard") else "")
+            + f"📊 Scoreboard: {esc(scoreboard(totals))}")
 
 
 def fmt_age(sec):
@@ -1123,21 +1247,31 @@ def fmt_age(sec):
 
 
 def format_heartbeat(info):
-    nm = ", ".join(f"{esc(s)} {d} {sc}" for s, d, sc in info["near_misses"]) or "none"
-    opens = ", ".join(f"{esc(t['symbol'])} {t['dir']} {t['grade']}" for t in info["open_trades"]) or "none"
-    return "\n".join([
-        f"💓 <b>BOT ALIVE</b> · War Room {VERSION}",
-        f"🔁 Scan cycles last hour: <b>{info['cycles']}</b> ({info['coins']} coins)",
-        f"🎯 Top near-misses (&lt;65): {nm}",
-        f"📡 Spot data: {esc(info['exchange'])} | Derivatives: {esc(info['deriv_src'] or 'none')} | "
-        f"BTC regime: {esc(info['regime'])}",
-        f"📂 Open trades: {len(info['open_trades'])} ({opens})",
-        f"🏆 Records (net, after fees): {esc(record_line(info['totals']))}",
-        f"🧠 AI: {esc(info['ai_status'])}",
-        f"📨 Alerts last hour: {info['alerts']} | AI rejections: {info['ai_rejected']}",
-        f"⚠️ Unavailable pairs: {esc(', '.join(f'{p} unavailable' for p in info['unavailable']) or 'none')}",
-        f"🧪 Skipped (bad data): {esc(', '.join(info['skipped']) or 'none')}",
-    ])
+    side = lambda d: "buy" if d == "LONG" else "short"
+    opens = ", ".join(f"{esc(coin_name(t['symbol']))} {side(t['dir'])}" for t in info["open_trades"]) or "none"
+    nm = ", ".join(f"{esc(coin_name(x[0]))} {side(x[1])} {x[2]}" + (f" ({esc(x[3])})" if len(x) > 3 else "")
+                   for x in info["near_misses"]) or "none"
+    ex = info["exchange"]
+    data = ("✅ Data: Binance" if ex == "BINANCE" else f"⚠️ Data: {esc(ex.title())} (Binance down)" if ex != "none"
+            else "❌ Data: no exchange reachable")
+    der = f"✅ Derivatives: {esc(info['deriv_src'].title())}" if info["deriv_src"] else "❌ Derivatives: none"
+    ai = info["ai_status"]
+    ai_s = ("❌ AI: no key" if "no key" in ai else "❌ AI: rate-limited, pausing" if "rate-limited" in ai
+            else "❌ AI: failing" if ai.startswith(("error", "empty")) else "✅ AI: working")
+    ok = ex == "BINANCE" and info["deriv_src"] and ai_s.startswith("✅")
+    lines = [f"💓 <b>BOT ALIVE</b> — {'working fine' if ok else 'working, but see the ❌/⚠️ below'} ({VERSION})",
+             f"🔍 Checked {info['coins']} coins {info['cycles']} times this hour",
+             f"📨 Alerts sent: {info['alerts']} (AI blocked {info['ai_rejected']}"
+             + (f", AI unclear {info['ai_unclear']}" if info.get("ai_unclear") else "") + ")",
+             f"📂 Open trades ({len(info['open_trades'])}): {opens}",
+             f"🎯 Almost alerts (need {B_MIN}): {nm}",
+             f"🏆 Scoreboard: {esc(scoreboard(info['totals']))}",
+             f"{data} · {der} · {ai_s}"]
+    if info["unavailable"]:
+        lines.append(f"⚠️ Not available on {esc(ex.title())}: {esc(', '.join(coin_name(p) for p in info['unavailable']))}")
+    if info["skipped"]:
+        lines.append(f"⚠️ Skipped (bad data): {esc(', '.join(coin_name(p) for p in info['skipped']))}")
+    return "\n".join(lines)
 
 
 def watchdog_message(state, now, max_age=WATCHDOG_MAX_AGE_S):
@@ -1145,10 +1279,28 @@ def watchdog_message(state, now, max_age=WATCHDOG_MAX_AGE_S):
     if last and now - last <= max_age:
         return None
     if not last:
-        return "🚨 <b>BOT DOWN</b> · no completed v10 scan cycle has been recorded yet.\nCheck GitHub → Actions."
-    when = datetime.fromtimestamp(last, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    return (f"🚨 <b>BOT DOWN</b> · no completed scan cycle for <b>{fmt_age(now - last)}</b> (last: {when}).\n"
-            "Check GitHub → Actions → War Room (is the workflow enabled? did the last run fail?).")
+        return ("⚠️ <b>BOT DOWN</b> — I haven't finished a single market check since v10 was installed. "
+                "Open GitHub → Actions to see why.")
+    return (f"⚠️ <b>BOT DOWN</b> — I haven't checked the market for {fmt_age(now - last)}. "
+            "Open GitHub → Actions to see why.")
+
+
+GUIDE_TEXT = "\n".join([
+    "📘 <b>HOW TO READ MY MESSAGES</b>",
+    "🟢 <b>BUY</b> = I think the price will go UP. You can use Binance Spot or Futures.",
+    "🔴 <b>SHORT (SELL)</b> = I think the price will go DOWN. Binance Futures only — you profit if the price falls.",
+    f"⭐ <b>A-GRADE</b> = strong setup ({A_MIN}+ points). <b>B-GRADE</b> = okay setup ({B_MIN}–{A_MIN - 1}), riskier.",
+    "1️⃣ Entry: the price to get in near.",
+    "2️⃣ Stop loss: if the price gets there, get out. It keeps the loss small.",
+    "3️⃣ Take profit 1: sell (or close) HALF there, then move your stop loss to your entry price — "
+    "after that the trade can't lose money.",
+    "4️⃣ Take profit 2: sell (or close) the REST there.",
+    "⏰ Time limit: if nothing is hit, close the trade after the hours shown.",
+    "✅ <b>TP1 HIT</b> = do step 3 now. 🏁 Trade finished = the result after Binance fees + the scoreboard.",
+    "💓 <b>BOT ALIVE</b> = my hourly “I'm working” message. ⚠️ <b>BOT DOWN</b> = I stopped — open GitHub → Actions.",
+    "🧪 Important: paper-test first (write the trades down, no real money). These rules are NOT proven to make "
+    "money yet — don't risk real money.",
+])
 
 
 # ---------------------------------------------------------------- git persistence
@@ -1219,6 +1371,8 @@ class Bot:
         self.last_push = 0.0
         self.last_push_hash = None
         self.cycle_stats = []
+        self.cycle_t0 = time.time()
+        self.pegged = set()
 
     def save(self):
         save_state(self.cfg.state_file, self.state)
@@ -1232,7 +1386,24 @@ class Bot:
             self.deriv.probe([norm_base(c) for c in self.coins])
         except Exception as e:
             log(f"Derivatives probe error: {err_text(e)}")
+        self.migrate_ai_gate()
         self.save()
+
+    def migrate_ai_gate(self):
+        """One-time: trades opened unreviewed by the pre-fix version (key set, ai UNAVAILABLE) leave the scoreboard."""
+        if self.state.get("ai_gate_migrated"):
+            return
+        if self.cfg.llm_key:
+            bad = lambda t: t.get("ai") == "UNAVAILABLE" and not t.get("ai_note")
+            for t in self.state["active_trades"] + self.state["closed_trades"]:
+                if isinstance(t, dict) and bad(t):
+                    t["exclude_from_scoreboard"] = True
+            self.state["totals"] = recompute_totals(self.state["closed_trades"])
+        self.state["ai_gate_migrated"] = True
+
+    def prune(self, now):
+        for k, scale in (("last_alert_time", 1), ("last_alert_candle", 1000), ("ai_rejected_candle", 1000)):
+            self.state[k] = {s: v for s, v in self.state[k].items() if now - v / scale <= STATE_KEEP_S}
 
     def refresh_coins(self):
         coins, src = None, self.spot.src
@@ -1283,7 +1454,7 @@ class Bot:
         return out
 
     def fetch_market(self, src, syms, now_ms):
-        workers = 8 if src.name == "BINANCE" else 4
+        workers = 8 if src.name == "BINANCE" else 1  # ccxt instances are not thread-safe
         with ThreadPoolExecutor(workers) as p:
             res = dict(zip(syms, p.map(lambda s: self._safe_fetch(src, s, now_ms), syms)))
         self.skipped = {s: r["err"] for s, r in res.items() if r.get("err")}
@@ -1301,6 +1472,9 @@ class Bot:
     def check_trades(self, src, prices, now):
         for t in list(self.state["active_trades"]):
             sym = t["symbol"]
+            if t.get("exchange") not in (src.name, "UNKNOWN", None):
+                log(f"{sym}: entered on {t['exchange']}, data now from {src.name}: keeping open until it is back")
+                continue
             try:
                 if not src.has(sym):
                     raise RuntimeError(f"{sym} not listed on {src.name}")
@@ -1315,10 +1489,11 @@ class Bot:
             for ev in events:
                 if ev["type"] == "TP1":
                     self.notify(format_tp1(t, ev))
-                else:
+                elif not t.get("exclude_from_scoreboard"):
                     tot = self.state["totals"].setdefault(t["grade"], {"w": 0, "l": 0, "net_sum": 0.0})
                     tot["w" if ev["win"] else "l"] += 1
                     tot["net_sum"] = round(tot["net_sum"] + ev["net"], 4)
+                if ev["type"] == "CLOSE":
                     self.state["closed_trades"] = (self.state["closed_trades"] + [t])[-CLOSED_CAP:]
                     self.notify(format_close(t, ev, self.state["totals"]))
             if t.get("status") == "CLOSED":
@@ -1367,6 +1542,14 @@ class Bot:
                 continue
             if sym in open_syms or now - self.state["last_alert_time"].get(sym, 0) < COOLDOWN_S:
                 continue
+            if is_pegged(price, m["df1h"]):
+                log(f"{sym}: skipped, pegged/stable-like price")
+                self.pegged.add(sym)
+                continue
+            if tp1_too_small(res["dir"], res["price"], res["tp1"], self.cfg.fee_spot, self.cfg.fee_fut,
+                             self.cfg.min_tp1_fee_mult):
+                self.state["near_miss"][sym] = [res["dir"], res["score"], int(now), "target too small vs fees"]
+                continue
             if self.state["last_alert_candle"].get(sym) == res["candle_ts"]:
                 continue
             if self.state["ai_rejected_candle"].get(sym) == res["candle_ts"]:
@@ -1385,16 +1568,18 @@ class Bot:
     def _alert(self, src, res, now):
         sym, hold = res["symbol"], self.cfg.max_hold(res["grade"])
         res["max_hold_h"] = hold
-        verdict, note = self.ai.review(res)
-        if verdict == "REJECTED":
-            log(f"{sym}: alert dropped by AI review")
+        verdict, note = self.ai.review(res, start_by=self.cycle_t0 + CYCLE_AI_BUDGET_S)
+        if verdict == "DEFER":
+            log(f"{sym}: AI review deferred to next cycle (AI throttle); nothing recorded")
+            return False
+        if verdict in ("REJECTED", "UNCLEAR"):
+            log(f"{sym}: alert dropped by AI review ({verdict})")
             self.state["ai_rejected_candle"][sym] = res["candle_ts"]
-            self.state["hour_stats"]["ai_rejected"] += 1
+            key = "ai_rejected" if verdict == "REJECTED" else "ai_unclear"
+            self.state["hour_stats"][key] = self.state["hour_stats"].get(key, 0) + 1
             self.save()
             return False
-        if verdict in ("APPROVED", "UNCLEAR"):
-            note = f"AI: {note}"
-        text = format_alert(res, src.name, note, hold, res.get("deriv_src"))
+        text = format_alert(res, src.name, verdict, note, hold, res.get("deriv_src"))
         if not self.tg.send(text):
             log(f"{sym}: alert not delivered; trade NOT recorded, will retry next cycle")
             return False
@@ -1403,7 +1588,7 @@ class Bot:
                  "entry": res["price"], "sl": res["sl"], "tp1": res["tp1"], "tp2": res["tp2"],
                  "entry_time": int(now), "candle_ts": res["candle_ts"], "exchange": src.name,
                  "market": res["market"], "funding8h": res.get("funding8h"), "oi_chg_1h": res.get("oi_chg_1h"),
-                 "btc_regime": res.get("btc_regime"), "ai": verdict, "tp1_hit": False, "checked_until": 0,
+                 "btc_regime": res.get("btc_regime"), "ai": verdict, "ai_note": note[:200], "tp1_hit": False, "checked_until": 0,
                  "status": "OPEN"}
         self.state["active_trades"].append(trade)
         self.state["last_alert_time"][sym] = int(now)
@@ -1429,23 +1614,25 @@ class Bot:
 
     # -- heartbeat / live
     def heartbeat_info(self, now):
-        nm = sorted(((s, v[0], v[1]) for s, v in self.state["near_miss"].items() if v[1] < B_MIN),
-                    key=lambda x: -x[2])[:3]
+        nm = sorted(((s, v[0], v[1]) + tuple(v[3:4]) for s, v in self.state["near_miss"].items()
+                     if v[1] < B_MIN or len(v) > 3), key=lambda x: -x[2])[:3]
         src = self.spot.src
         return {"cycles": len([t for t in self.state["cycle_times"] if now - t <= 3600]), "coins": len(self.coins),
                 "near_misses": nm, "exchange": src.name if src else "none", "deriv_src": self.deriv_used,
                 "regime": self.regime, "open_trades": self.state["active_trades"], "totals": self.state["totals"],
                 "ai_status": self.ai.status(), "alerts": self.state["hour_stats"]["alerts"],
-                "ai_rejected": self.state["hour_stats"]["ai_rejected"], "unavailable": self.unavailable,
-                "skipped": sorted(self.skipped)}
+                "ai_rejected": self.state["hour_stats"]["ai_rejected"],
+                "ai_unclear": self.state["hour_stats"].get("ai_unclear", 0), "unavailable": self.unavailable,
+                "skipped": sorted(set(self.skipped) | self.pegged)}
 
     def maybe_heartbeat(self, now):
         if now - self.state.get("last_heartbeat", 0) < 3600:
             return
-        if self.tg.send(format_heartbeat(self.heartbeat_info(now))):
-            self.state["last_heartbeat"] = int(now)
-            self.state["near_miss"] = {}
-            self.state["hour_stats"] = {"alerts": 0, "ai_rejected": 0}
+        self.notify(format_heartbeat(self.heartbeat_info(now)))  # undelivered → outbox; counters reset either way
+        self.state["last_heartbeat"] = int(now)
+        self.state["near_miss"] = {}
+        self.state["hour_stats"] = {"alerts": 0, "ai_rejected": 0, "ai_unclear": 0}
+        self.pegged = set()
 
     def maybe_live_message(self):
         if self.state.get("v10_live_sent"):
@@ -1459,6 +1646,11 @@ class Bot:
                 f"Max hold: A {self.cfg.max_hold_a:g}h, B {self.cfg.max_hold_b:g}h. AI: {esc(self.ai.status())}.")
         if self.tg.send(text):
             self.state["v10_live_sent"] = True
+            self.save()
+
+    def maybe_guide(self):
+        if not self.state.get("guide_sent") and self.tg.send(GUIDE_TEXT):
+            self.state["guide_sent"] = True
             self.save()
 
     def healthcheck(self):
@@ -1490,17 +1682,20 @@ class Bot:
     # -- one cycle
     def cycle(self, now=None):
         t0 = time.perf_counter()
-        now = now or time.time()
-        now_ms = int(now * 1000)
+        self.cycle_t0 = time.time()
         src = self.spot.src or self.spot.select()
         if src is None:
             log("No spot exchange reachable this cycle")
             return False
+        now = now or time.time() + getattr(src, "time_offset_ms", 0) / 1000
+        now_ms = int(now * 1000)
+        self.prune(now)
         self.spot.maybe_return_to_primary()
         src = self.spot.src
         if not self.coins:
             self.refresh_coins()
         self._safe("v10 live message", self.maybe_live_message)
+        self._safe("guide message", self.maybe_guide)
         scan = list(dict.fromkeys(self.coins + [t["symbol"] for t in self.state["active_trades"]]))
         avail = [s for s in scan if src.has(s)]
         self.unavailable = [s for s in scan if not src.has(s)]
@@ -1557,6 +1752,7 @@ def run_loop(cfg, bot=None):
         raise SystemExit(f"signal {signum}")
     try:
         signal.signal(signal.SIGTERM, on_term)
+        signal.signal(signal.SIGINT, on_term)
     except ValueError:
         pass
     try:
@@ -1646,30 +1842,46 @@ def run_diagnose(cfg):
     return 0
 
 
-def run_test_messages(cfg):
-    """JRN-31: one sample of each message type, marked TEST, through the real send path."""
-    cfg.msg_prefix = cfg.msg_prefix or "TEST"
-    tg = Telegram(cfg)
-    base = {"symbol": "BTC/USDT", "price": 100.0, "atr": 1.0, "rsi5": 60.1, "rsi1h": 57.3, "vol": 1.62, "ob": 22.0,
-            "funding8h": 0.0001, "oi_chg_1h": 3.0, "btc_regime": "up", "deriv_adj": 0}
-    a = dict(base, dir="LONG", grade="A", score=85, sl=98.2, tp1=102.0, tp2=103.6, market=market_label("LONG"),
-             reasons=["1H Bull EMA", "5M EMA+VWAP Bull", "RSI Bull 60.1", "Bid Wall +22%"])
-    b = dict(base, symbol="ETH/USDT", dir="SHORT", grade="B", score=70, sl=101.8, tp1=98.0, tp2=96.4,
-             market=market_label("SHORT"), reasons=["1H Bear EMA", "5M EMA+VWAP Bear", "Ask Wall -18%"],
-             funding8h=0.00025, oi_chg_1h=-1.2, btc_regime="down")
-    t = {"symbol": "BTC/USDT", "dir": "LONG", "grade": "A", "entry": 100.0, "tp1": 102.0, "tp2": 103.6, "sl": 98.2}
-    totals = {"A": {"w": 1, "l": 0}, "B": {"w": 0, "l": 0}}
-    b_note = "AI: APPROVED: momentum <aligned> & funding hot"
-    if cfg.llm_key:
-        verdict, note = AIReviewer(cfg).review(dict(b, max_hold_h=cfg.max_hold_b))
-        b_note = note if verdict == "UNAVAILABLE" else f"AI ({verdict}): {note}"
+def sample_messages(cfg, ai_review=False):
+    """Example of every message type (used by --test-messages and the tests)."""
+    a = {"symbol": "ETH/USDT", "dir": "LONG", "grade": "A", "score": 85, "price": 3450.2, "sl": 3401.0,
+         "tp1": 3505.0, "tp2": 3550.0, "market": market_label("LONG"), "funding8h": 0.0001, "oi_chg_1h": 3.0,
+         "btc_regime": "up", "deriv_adj": 0, "rsi5": 60.1, "rsi1h": 57.3, "vol": 1.62, "ob": 0.0,
+         "reasons": ["1H Bull EMA", "5M EMA+VWAP Bull", "Vol 1.62x"]}
+    b = {"symbol": "PEPE/USDT", "dir": "SHORT", "grade": "B", "score": 70, "price": 0.0004567, "sl": 0.0004649,
+         "tp1": 0.0004476, "tp2": 0.0004403, "market": market_label("SHORT"), "funding8h": 0.00025,
+         "oi_chg_1h": -1.2, "btc_regime": "down", "deriv_adj": 0, "rsi5": 41.0, "rsi1h": 44.0, "vol": 1.4, "ob": 0.0,
+         "reasons": ["1H Bear EMA", "5M EMA+VWAP Bear", "RSI Bear 41.0"]}
+    verdict, note = "APPROVED", "APPROVED: trend and volume agree; keep the stop tight."
+    if ai_review and cfg.llm_key:
+        verdict, note = AIReviewer(cfg).review(dict(a, max_hold_h=cfg.max_hold_a))
         log(f"Test AI review: {verdict}")
-    msgs = [format_alert(a, "BINANCE", "AI unavailable (no key)", cfg.max_hold_a, "HYPERLIQUID"),
-            format_alert(b, "KUCOIN", b_note, cfg.max_hold_b, "OKX"),
-            format_tp1(t, {"price": 102.0, "gross_half": 2.0}),
-            format_close(t, {"reason": "TP2 HIT", "exit": 103.6, "gross": 2.8, "net": 2.6, "win": True}, totals),
-            watchdog_message({"last_cycle_time": int(time.time()) - 3 * 3600 - 300}, time.time())]
-    results = [tg.send(m) for m in msgs]
+    t = {"symbol": "ETH/USDT", "dir": "LONG", "grade": "A", "entry": 3450.2, "tp1": 3505.0, "tp2": 3550.0,
+         "sl": 3401.0}
+    totals = {"A": {"w": 3, "l": 1}, "B": {"w": 1, "l": 2}}
+    info = {"cycles": 58, "coins": 50, "near_misses": [("BTC/USDT", "SHORT", 60), ("XRP/USDT", "SHORT", 60),
+            ("INIT/USDT", "SHORT", 60)], "exchange": "BINANCE", "deriv_src": "HYPERLIQUID", "regime": "down",
+            "open_trades": [{"symbol": "TRX/USDT", "dir": "SHORT"}, {"symbol": "ETH/USDT", "dir": "SHORT"},
+                            {"symbol": "NIGHT/USDT", "dir": "LONG"}], "totals": totals,
+            "ai_status": "ok (gemini-3.5-flash-lite)", "alerts": 2, "ai_rejected": 1, "unavailable": [], "skipped": []}
+    return {"guide": GUIDE_TEXT,
+            "alert_long": format_alert(a, "BINANCE", verdict, note, cfg.max_hold_a, "HYPERLIQUID"),
+            "alert_short": format_alert(b, "BINANCE", "UNAVAILABLE", "AI unavailable (no key)", cfg.max_hold_b,
+                                        "HYPERLIQUID"),
+            "tp1": format_tp1(t, {"price": 3505.0, "gross_half": pct_move("LONG", 3450.2, 3505.0)}),
+            "close": format_close(t, {"reason": "TP2 HIT", "exit": 3550.0, "gross": 2.8, "net": 2.6, "win": True},
+                                  totals),
+            "heartbeat": format_heartbeat(info),
+            "bot_down": watchdog_message({"last_cycle_time": int(time.time()) - 2 * 3600 - 900}, time.time())}
+
+
+def run_test_messages(cfg):
+    """Send TEST samples (TEST_MESSAGES=comma list of sample names, default: all) through the real send path."""
+    cfg.msg_prefix = cfg.msg_prefix or "TEST"
+    msgs = sample_messages(cfg, ai_review=True)
+    names = [n.strip() for n in env_str("TEST_MESSAGES", ",".join(msgs)).split(",") if n.strip() in msgs]
+    tg = Telegram(cfg)
+    results = [tg.send(msgs[n]) for n in names]
     log(f"Test messages delivered: {sum(results)}/{len(results)}")
     return 0 if all(results) else 1
 

@@ -32,6 +32,7 @@ def cfg(tmp_path, monkeypatch):
     monkeypatch.setenv("TELEGRAM_CHAT_ID", FAKE_CHAT)
     monkeypatch.setenv("STATE_FILE", str(tmp_path / "state.json"))
     c = wr.Config()
+    c.min_tp1_fee_mult = 0  # fake candles have tiny ATR; the fee floor has its own test
     wr.mask_secrets(c)
     return c
 

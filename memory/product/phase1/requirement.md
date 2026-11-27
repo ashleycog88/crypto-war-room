@@ -173,3 +173,20 @@ Q-9  Tag: UX.Clarity
      Meter: human
      Must: 15   Plan: 5 (estimate)
 ```
+
+## Phase 1b — fixes after the first live run (2026-11-27)
+
+### AI review must not be skipped by the bot's own throttle
+- REQ-133 [unwanted] If an AI review is blocked only by the bot's own call throttle (not by a missing key, a 429 backoff or an error), then the system shall wait for the next allowed slot instead of sending the alert unreviewed.
+- REQ-134 [unwanted] If waiting would push the cycle past its time budget, then the system shall defer the setup to the next cycle while its signal candle is still the latest closed 5m candle (interpreted).
+- REQ-135 [always] The system shall send "AI unavailable" alerts only when there is no key, a 429 backoff is active, or every model in the chain failed.
+
+### Plain-language Telegram messages (user said the trade messages are too complicated)
+- REQ-136 [always] Alert messages shall read like plain instructions: action word first ("BUY" for LONG, "SHORT (SELL)" for SHORT), coin name, grade with a plain meaning ("A-GRADE · strong setup" / "B-GRADE · okay setup"), and where to trade ("Binance Spot or Futures" / "Binance Futures only").
+- REQ-137 [always] Alert messages shall show numbered steps: entry ("Buy now near" / "Short now near"), stop loss with a plain explanation and % distance, Take profit 1 "→ sell/close HALF" with %, Take profit 2 "→ sell/close the REST" with %, and "Close the trade after N hours if nothing hits".
+- REQ-138 [always] Alert messages shall show the AI verdict in one plain line and at most one short "Why" line in plain words; RSI/OB/funding/OI/source details shall be removed from alerts or reduced to one small final line (interpreted).
+- REQ-139 [always] Prices shall be formatted for humans: thousands separators and a sensible number of decimals for the coin's price size.
+- REQ-140 [event] When TP1 is touched, the system shall send a plain message: "TP1 HIT", "Sell/close HALF now", and "Move your stop loss to <entry> (your entry price) — this trade can't lose money now".
+- REQ-141 [event] When a trade closes, the system shall send a plain message with WIN/LOSS, net % after fees, the reason in plain words (hit Take profit 2 / hit stop loss / came back to entry after TP1 / time limit reached), and a scoreboard line "A-grade: X wins · Y losses (Z%)" and the same for B.
+- REQ-142 [always] The hourly heartbeat shall be plain language and keep "BOT ALIVE", scan count, alerts sent, AI blocks, open trades, near-misses ("almost alerts"), scoreboard, and one status line with ✅/❌ for data, derivatives and AI.
+- REQ-143 [event] When the updated bot first starts, the system shall send a one-time "HOW TO READ MY MESSAGES" guide explaining each message type in plain words.

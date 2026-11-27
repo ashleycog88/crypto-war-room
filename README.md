@@ -37,6 +37,7 @@ Never link a billing account to the Gemini key. The free tier is enough, and the
 | message | meaning |
 |---|---|
 | 🤖 **v10 LIVE** | sent once, the first time v10 starts |
+| 📘 **HOW TO READ MY MESSAGES** | sent once: a plain guide to every message |
 | 🟢/🔴 **A-GRADE 85/100 · COIN LONG/SHORT** | a setup. **A** = score 80+ (held up to 24 h), **B** = 65–79 (held up to 4 h). LONG = "Spot or Futures", SHORT = "Futures only". It shows entry, stop loss (SL), two take-profits (TP1, TP2), funding rate, open-interest change over 1 h, BTC trend and the AI note |
 | 🎯 **TP1 HIT … SL moved to breakeven** | sell half at TP1 and move your stop to the entry price |
 | ✅/🛑 **CLOSED** | the trade ended (TP2 HIT, STOP LOSS, BREAKEVEN after TP1, or TIME EXIT). Shows net % **after Binance fees** and the separate A and B win/loss records |
@@ -47,7 +48,7 @@ Fees counted: LONG 0.10% each way (0.20% round trip), SHORT 0.05% each way (0.10
 
 ## 4. Optional settings
 You can add these as `env:` lines in `war_room.yml`. Defaults are in brackets:
-`TOP_N_COINS` (50), `MAX_HOLD_A_HOURS` (24), `MAX_HOLD_B_HOURS` (4), `FEE_PCT_SPOT` (0.10), `FEE_PCT_FUTURES` (0.05), `USE_DERIV_SCORE` (off; `1` adds up to ±10 points from funding, OI and BTC trend), `RUN_MINUTES` (58), `SCAN_INTERVAL` (60), `DRY_RUN` (`1` = print messages instead of sending).
+`TOP_N_COINS` (50), `MAX_HOLD_A_HOURS` (24), `MAX_HOLD_B_HOURS` (4), `FEE_PCT_SPOT` (0.10), `FEE_PCT_FUTURES` (0.05), `USE_DERIV_SCORE` (off; `1` adds up to ±10 points from funding, OI and BTC trend), `RUN_MINUTES` (58), `SCAN_INTERVAL` (60), `DRY_RUN` (`1` = print messages instead of sending), `MIN_TP1_FEE_MULT` (3; skip setups whose Take profit 1 is smaller than 3× the round-trip fee, `0` = off), `OB_PENALTY` (15; points removed when the order book leans against the trade, `0` = off), `EXCLUDE_COINS` (comma list).
 
 ## 5. Changing files for free
 Open the file on GitHub → pencil icon → paste the new content → *Commit changes*. The bot keeps your edits. If you and the bot both change `state.json`, the bot's copy wins.

@@ -213,3 +213,36 @@ Most checks are offline (pytest with synthetic data / mocked exchange, derivativ
 - id: JRN-53
   steps: Make 10 setups qualify in the same cycle (mocked).
   expected: 10 alerts sent roughly 1 s apart, all HTTP 200, each recorded once.
+
+## Phase 1b journeys
+
+- id: JRN-68
+  steps: Make 8 setups qualify in one cycle with a working AI key (mock AI), AI_MIN_GAP 4 s and max 8 calls/min.
+  expected: Every one of the 8 is AI-reviewed before sending (no "AI unavailable (throttled)"); any that can't fit in this cycle's budget are reviewed and sent next cycle while their candle is still current; REJECTED ones are dropped.
+
+- id: JRN-69
+  steps: Repeat with no key, then with a 429 backoff active.
+  expected: Alerts go out with "AI unavailable" (only these cases, plus all-models-failed).
+
+- id: JRN-70
+  superseded: [JRN-7, JRN-8]
+  steps: Format an 85-score LONG on ETH at 3450.2 and a 70-score SHORT on a coin priced 0.0004567.
+  expected: LONG first line like "🟢 BUY ETH · A-GRADE · strong setup (85/100)" with "Binance Spot or Futures"; SHORT first line like "🔴 SHORT (SELL) … · B-GRADE · okay setup (70/100)" with "Binance Futures only"; both still contain "A-GRADE"/"B-GRADE" and the score; numbered steps for entry, stop loss (+ % and plain explanation), TP1 "HALF", TP2 "REST", "Close the trade after 24 hours"/"4 hours"; prices human-formatted (3,450.20 and 0.0004567); one AI line; at most one plain "Why" line; total ≤ ~14 lines; all escaped.
+
+- id: JRN-71
+  superseded: [JRN-19]
+  steps: LONG trade touches TP1 then TP2 (same numbers as JRN-19).
+  expected: TP1 message contains "TP1 HIT", "HALF", and "Move your stop loss to 100" with "can't lose money now"; close message says WIN, "+2.60%" after fees, reason "hit Take profit 2", scoreboard "A-grade: 1 wins · 0 losses (100%)" style line.
+
+- id: JRN-72
+  steps: Close messages for SL, breakeven-after-TP1 and TIME EXIT.
+  expected: Reasons read "hit stop loss", "came back to entry after TP1", "time limit reached"; LOSS/WIN label matches net sign.
+
+- id: JRN-73
+  superseded: [JRN-32]
+  steps: Read the heartbeat after a short run.
+  expected: Plain-language heartbeat containing "BOT ALIVE", scans done, alerts sent, AI blocks, open trades (coin + buy/short), "almost alerts" (top 3 below 65), scoreboard, one status line with ✅/❌ for data, derivatives, AI.
+
+- id: JRN-74
+  steps: Start the updated bot with a state that already has v10 booted but no guide sent; start again.
+  expected: "HOW TO READ MY MESSAGES" sent exactly once.
