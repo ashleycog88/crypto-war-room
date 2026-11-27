@@ -1,5 +1,17 @@
 {
-  "active_trades": [],
+  "active_trades": [
+    {
+      "symbol": "SOL/USDT",
+      "dir": "LONG",
+      "entry": 71.3,
+      "sl": 71.066199,
+      "tp1": 71.559778,
+      "tp2": 71.767601
+    }
+  ],
   "closed_trades": [],
-  "last_alert_time": {}
+  "last_alert_time": {
+    "SOL/USDT": 1795740535
+  },
+  "booted": true
 }
