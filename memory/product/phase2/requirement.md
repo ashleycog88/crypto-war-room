@@ -28,6 +28,8 @@ Answer honestly, with data, "would the v10 rules have made money after fees?" �
 - REQ-119 [always] The backtest shall compare exit styles: (a) live style — half at TP1, breakeven, rest to TP2; (b) full exit at TP1; (c) half at TP1 then trailing stop of 1 ATR on the rest; (d) half at TP1 then hold to max-hold time with breakeven stop.
 - REQ-120 [always] The backtest shall compare derivatives variants: off (live default), USE_DERIV_SCORE bonus on, and a BTC-regime filter (no alt LONGs when BTC is down, no alt SHORTs when BTC is up).
 - REQ-121 [always] The backtest shall rank coins by net result and flag coins with fewer than 10 trades as "not enough data".
+- REQ-144 [always] The backtest shall compare the fee floor MIN_TP1_FEE_MULT at 0, 2, 3 (live default) and 5.
+- REQ-145 [always] The backtest shall apply the live stable-like/peg filter and the live coin exclusions; the order-book penalty is inert in the primary run because order-book history does not exist (stated in the report).
 
 ### Honesty checks
 - REQ-122 [always] The backtest shall pick the best settings using only the first 2 months (training) and report their result on the last month (unseen test) next to it.
@@ -71,3 +73,14 @@ Q-15 Tag: Trust.Overfitting
      Meter: report inspection
      Must: shown for every recommendation   Plan: shown + warning when unseen < 50% of training
 ```
+
+## Phase 2b — Quiet mode (live bot), decided after the backtest showed no edge
+
+- REQ-146 [optional] Where QUIET_MODE=1 (new default, set in the workflow), the system shall keep scanning, AI-reviewing and paper-tracking trades exactly as before but send no per-trade alert, TP1 or close messages.
+- REQ-147 [event] When the daily summary time is reached (DAILY_SUMMARY_UTC "03:30" = 09:00 IST, configurable), the system shall send one plain "📅 DAILY SUMMARY" message.
+- REQ-148 [always] The daily summary shall show, for the last 24 h: paper trades opened (A/B, buy/short counts), paper trades closed with WIN/LOSS and net % after fees, the A/B scoreboard (last 24 h and all-time counted trades), best and worst closed trade, open trades count, AI approved/rejected/unclear counts, and the line "Paper test only — don't trade these with real money."
+- REQ-149 [unwanted] If a run is not active at the summary time, then the system shall send the missed daily summary at the start of the next run (once per day, tracked in state).
+- REQ-150 [always] The system shall keep the hourly BOT ALIVE and BOT DOWN messages unchanged in quiet mode, with "(quiet mode)" shown in BOT ALIVE.
+- REQ-151 [event] When quiet mode first starts, the system shall send a one-time plain notice: "🤫 Quiet mode on — I'll keep testing silently and send one summary every day at 09:00 (India time)."
+- REQ-152 [optional] Where QUIET_MODE=0, the system shall behave exactly as before (per-trade messages).
+- REQ-153 [always] Quiet mode shall be switchable without code edits (GitHub repository variable or workflow env), documented in README in kid-level steps.

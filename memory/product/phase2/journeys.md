@@ -57,3 +57,29 @@ All checks run on the pod with bash/python. Phase 1 journeys JRN-1..JRN-53 stay 
 - id: JRN-67
   steps: Make one coin's derivatives history unavailable (or find one naturally).
   expected: That coin still runs in the base variants; the report says derivatives variants excluded it.
+
+## Phase 2b journeys — Quiet mode
+
+- id: JRN-75
+  steps: QUIET_MODE=1, mock 3 AI-approved setups, then TP1 and a close in later cycles.
+  expected: Trades are opened/tracked/closed in state exactly as with QUIET_MODE=0, but 0 alert/TP1/close Telegram messages are sent.
+
+- id: JRN-76
+  steps: Advance the clock past 03:30 UTC with 2 closed (1 win, 1 loss) and 1 open paper trade from the last 24 h.
+  expected: One "📅 DAILY SUMMARY" sent with opened/closed counts, WIN/LOSS lines with net %, A/B scoreboard (24 h + all-time), best/worst, open count, AI approved/rejected/unclear, and "Paper test only — don't trade these with real money."; not sent again that day.
+
+- id: JRN-77
+  steps: No run active at 03:30 UTC; next run starts at 04:10 UTC.
+  expected: Missed summary sent once at the start of that run.
+
+- id: JRN-78
+  steps: Run an hour in quiet mode.
+  expected: BOT ALIVE still sent hourly and shows "(quiet mode)"; BOT DOWN logic unchanged.
+
+- id: JRN-79
+  steps: Start quiet mode for the first time, then again.
+  expected: "🤫 Quiet mode on …09:00 (India time)" notice sent exactly once.
+
+- id: JRN-80
+  steps: QUIET_MODE=0.
+  expected: Per-trade messages exactly as in Phase 1b (JRN-70..74 still pass).
