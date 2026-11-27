@@ -1,42 +1,63 @@
-name: Crypto Quant War Room v9 (5-Min)
+name: Crypto War Room v10 (hourly run, scans every 60s)
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '7 * * * *'
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: war-room-bot
+  cancel-in-progress: false
+
 jobs:
   scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.11'
           cache: 'pip'
 
       - name: Install dependencies
+        timeout-minutes: 8
         run: pip install -r requirements.txt
 
-      - name: Run War Room Bot
+      - name: Mask cleaned Telegram token and chat id
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 -c "
+          import os, re
+          m = re.search(r'(\d{6,15}:[A-Za-z0-9_-]{25,60})', os.environ.get('TELEGRAM_BOT_TOKEN', ''))
+          print('::add-mask::' + m.group(1)) if m else print('Telegram token secret missing or malformed')
+          c = re.sub(r'[^\d-]', '', os.environ.get('TELEGRAM_CHAT_ID', ''))
+          print('::add-mask::' + c) if len(c) >= 5 else None
+          "
+
+      - name: Run War Room bot (~58 min)
+        timeout-minutes: 63
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_FALLBACK_MODELS: ${{ secrets.LLM_FALLBACK_MODELS }}
+          HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+          RUN_MINUTES: '58'
+          SCAN_INTERVAL: '60'
         run: python war_room_bot.py
 
-      - name: Save updated state
-        run: |
-          git config --local user.email "bot@://github.com"
-          git config --local user.name "WarRoomBot"
-          git add state.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update state.json" && git push)
-          
+      - name: Save state.json (always, even if the bot step failed)
+        if: always()
+        timeout-minutes: 6
+        run: python war_room_bot.py --commit-state

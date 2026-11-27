@@ -1,0 +1,25 @@
+# PRD — Crypto War Room bot v10
+
+## Original problem statement
+Phase 1 build brief: harden the Crypto War Room bot (Python, GitHub Actions, Telegram), with no web app. Full specs are in `memory/product/overview.md`, `memory/product/phase1/requirement.md` (REQ-1..103, Q-1..9) and `memory/product/phase1/journeys.md` (JRN-1..53).
+
+## Architecture
+- `war_room_bot.py`: one file containing pure functions (indicators, scoring, grades, trade resolution, fees, coin list), data routers (Binance data-api → KuCoin → OKX → Kraken → Gate → Bybit; derivatives Hyperliquid → OKX → Gate → KuCoin Futures → Binance fapi), Telegram, Gemini AI review, atomic state, git sync, and the modes `--watchdog`, `--diagnose`, `--commit-state` and `--test-messages`.
+- Workflows: `war_room.yml` (hourly at :07, 58-minute loop), `watchdog.yml` (every 2 h at :37), `diagnostics.yml` (manual).
+- Tests: `tests/` (81 offline pytest tests; `fakes.py` holds the shared fakes).
+
+## Implemented (2026-11-27)
+- Phase 1 is complete. 81 offline tests pass.
+- Live checks from the pod:
+  - Dry run.
+  - Telegram: JRN-30 (2 messages) and JRN-31 (5 messages), all HTTP 200.
+  - Gemini 3.5-flash-lite: OK.
+  - Diagnostics.
+- Coin list now leaves out Binance tokenized stocks (permission group TRD_GRP_261), gold tokens (XAUT, PAXG) and the new stablecoins (U, RWUSD). Extra coins can be excluded with `EXCLUDE_COINS`.
+
+## Backlog
+- Done 2026-11-27: AI fallback chain `gemini-3.1-flash-lite` → `gemini-3.6-flash`, configurable with `LLM_FALLBACK_MODELS`, at most 30 s per alert. Fixed the flaky test (fake clock was tied to wall-clock time); 20 of 20 full-suite runs pass.
+- Note: gemini-3.6-flash works but took about 31 s live, so it usually won't fit in the time budget.
+- P0: user sets the GitHub secrets and pushes the files.
+- P1: Phase 2. Backtest that imports `evaluate_pair`, `resolve_trade` and `net_pnl`.
+- P2: Phase 3 edge watchers. Phase 4 apply the chosen rules.

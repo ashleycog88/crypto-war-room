@@ -1,0 +1,16 @@
+.env
+*.env
+backend/
+frontend/
+.emergent/
+__pycache__/
+*.pyc
+.pytest_cache/
+test_reports/
+e1_test_reports/
+test_result*.md
+*.log
+.state-*.tmp
+state.json.corrupt-*
+state_*.json
+tmp_state*.json

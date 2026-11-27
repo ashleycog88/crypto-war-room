@@ -1,0 +1,85 @@
+# Requirements: Crypto Quant War Room Bot (v10)
+
+## Core Value
+A free, always-on, fail-safe Python bot on GitHub Actions that scans the top 50 Binance USDT coins with live Binance spot data + derivatives data, sends trustworthy graded Telegram trade alerts (A/B) the user can take on Binance Spot (longs) and Binance Futures (longs + shorts), tracks each trade to a real after-fee outcome, proves it is alive every hour, and whose rules (coins, hold times, extra signals) are justified by data — a 3-month backtest plus live forward tracking. NO website, NO app screen, NO backend server — only bot files in the repo root.
+
+## Personas & Roles
+- Trader (repo owner, non-technical, trades manually on Binance.com spot AND futures, standard fees, wants real profit, zero spend unless essential): receives Telegram alerts, reads win rates, edits GitHub secrets. Only persona.
+
+## Features
+| id | feature | persona | phase |
+|---|---|---|---|
+| F-1 | Order book score works: size from b[1]/a[1], limit=20 (KuCoin only 20 or 100; 20 valid everywhere) | Trader | 1 |
+| F-2 | Volume, RSI, EMA, VWAP read from last CLOSED 5m candle; 1h trend from last closed 1h candle (interpreted) | Trader | 1 |
+| F-3 | Fetch 200+ candles (5m: 300, 1h: 250) so EMA50 is accurate | Trader | 1 |
+| F-4 | Two alert grades clearly labelled: A-GRADE (80+) and B-GRADE (65–79) | Trader | 1 |
+| F-5 | AI review fixed: res.choices[0].message.content, free Gemini via OpenAI-compatible URL, exact model name given; REJECTED drops the alert | Trader | 1 |
+| F-6 | All dynamic text escaped so Telegram never rejects a message (+ plain-text fallback, 4096 cap, send throttle) | Trader | 1 |
+| F-7 | Trade tracking from candle highs/lows since entry; TP1 → bank half + SL to breakeven; max-hold auto-close; separate A/B records | Trader | 1 |
+| F-8 | state.json saved and committed every run without push conflicts | Trader | 1 |
+| F-9 | One GitHub Actions run per hour, scanning every 60 s inside, runs never overlap | Trader | 1 |
+| F-10 | Hourly "BOT ALIVE" Telegram with scans done and closest near-miss scores | Trader | 1 |
+| F-11 | Fees subtracted from every recorded result: Binance standard — LONG recorded at spot 0.10% each way (conservative; valid for spot or futures), SHORT at USDⓈ-M futures taker 0.05% each way; configurable | Trader | 1 |
+| F-12 | Live derivatives watch: funding rate, open-interest 1h change, BTC market regime; multi-source fallback; shown on alerts + heartbeat; scoring use behind a switch until proven | Trader | 1 (data) / 2 (proof) |
+| F-13 | Fail-proofing: Telegram-before-record, timeouts everywhere, exchange + data-source fallbacks, missing-pair reporting, candle sanity checks, Telegram 429 handling | Trader | 1 |
+| F-14 | Security hardening: token masked in logs, actions pinned to SHAs, least-privilege permissions, no secret ever printed | Trader | 1 |
+| F-15 | Watchdog workflow: "BOT DOWN" Telegram if no completed cycle for 2 hours; optional free Healthchecks.io ping (HEALTHCHECK_URL) | Trader | 1 |
+| F-16 | One-click diagnostics workflow reporting which spot exchanges / derivatives sources / Telegram / Gemini work from GitHub's runners | Trader | 1 |
+| F-17 | Binance as primary price source via the public market-data host that works from US runners (data-api.binance.vision), with KuCoin → OKX → Kraken → Gate.io → Bybit fallbacks | Trader | 1 |
+| F-18 | Coin universe = top 50 Binance USDT pairs by 24h quote volume (no stablecoins, leveraged tokens or fiat pairs), refreshed every run | Trader | 1 |
+| F-19 | Market labels on alerts: LONG = "Spot or Futures", SHORT = "Futures only" | Trader | 1 |
+| F-20 | Backtest: last 3 months, all 50 coins, same scoring code as the live bot, after fees + slippage, A vs B, with/without derivatives, walk-forward check, per-coin ranking | Trader | 2 |
+| F-21 | Data-driven exits: backtest compares hold times and exit styles per grade; recommends values | Trader | 2 |
+| F-22 | Plain-words results report + suggested rule changes; user decides | Trader | 2 |
+| F-23 | Edge watchers: news headlines rated by free Gemini, Binance big-order (whale trade) flow, top-winning Hyperliquid wallets' net positioning — shown on alerts, logged for forward-testing, score only once proven | Trader | 3 |
+| F-24 | Apply the rule changes, coin list and hold times the user picks | Trader | 4 |
+| F-25 | Kid-level GitHub settings guide + how to save files to GitHub (paid button and free copy-paste path) | Trader | 1 and 4 |
+
+## Phases
+- Phase 1 → working, hardened live bot on Binance data, top 50 coins, temporary hold times A 24h / B 4h (configurable), verified offline + real Telegram test messages → F-1..F-19, F-25
+  - [phase1/requirement.md](phase1/requirement.md)
+  - [phase1/journeys.md](phase1/journeys.md)
+- Phase 2 → 3-month backtest of the exact live rules; results + recommendations in plain words → F-12 (proof), F-20, F-21, F-22
+- Phase 3 → edge watchers (news, whale trades, smart-money wallets), forward-tested → F-23
+- Phase 4 → apply the user's chosen rules / coins / hold times; re-verify; final guide → F-24, F-25
+
+## UI/UX Rules
+- The only "UI" is Telegram messages (and reports relayed in chat). HTML-formatted, every dynamic value escaped, emojis kept.
+- Grade obvious in the first line ("A-GRADE" / "B-GRADE"); market label obvious ("Spot or Futures" / "Futures only").
+- Prices shown are Binance prices whenever Binance data is reachable; the source exchange is shown otherwise.
+- Results always shown after fees.
+- Never build a website, app, React frontend or FastAPI backend.
+
+## Integrations
+| service | use | cost | key/secret |
+|---|---|---|---|
+| Telegram Bot API | alerts | free | TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (in GitHub secrets; user provides them here for the live test) |
+| Google Gemini free tier via `https://generativelanguage.googleapis.com/v1beta/openai/` | AI review (later: news rating) | free (never link billing) | LLM_API_KEY, LLM_BASE_URL, LLM_MODEL=`gemini-3.5-flash-lite` (fallback `gemini-3.8-flash`). User has no key yet — bot must work without it. |
+| Binance public market data `https://data-api.binance.vision` (api.binance.com / fapi return 451 from US runners) | candles, order book, tickers, top-50 list | free, no key | none |
+| ccxt public spot fallbacks: KuCoin → OKX → Kraken → Gate.io → Bybit | fallback prices | free | none |
+| Public derivatives (no key), fallback chain chosen by builder after probing — e.g. Hyperliquid info API (one call for all coins), OKX, KuCoin Futures, Gate.io, Kraken Futures, Binance fapi (works only if not geo-blocked) | funding rate, open interest | free | none |
+| GitHub Actions (public repo) | runner, watchdog, diagnostics | free, unlimited for public repos | built-in GITHUB_TOKEN |
+| Healthchecks.io (optional) | outside dead-man switch | free tier | HEALTHCHECK_URL (optional) |
+| Phase 3 (later): crypto news RSS feeds, Binance aggTrades, Hyperliquid leaderboard + clearinghouseState | edge watchers | free | none |
+
+User directive: spend nothing unless absolutely essential; keep every free alternative.
+
+## Edge Cases
+- AI key missing / 429 / wrong model / empty reply / timeout → alert sent with "AI unavailable" (only explicit REJECTED drops it).
+- Gemini thinking tokens can eat max_tokens → low reasoning effort, enough max_tokens, handle None.
+- SL and TP inside the same candle → SL first.
+- Old v9 state.json must load and upgrade automatically; state.json is NOT edited here.
+- GitHub cron late or skipped → concurrency queue, back-to-back runs, watchdog.
+- User edits files on GitHub → pull-rebase retry; bot's state.json wins.
+- Binance main API and many derivatives APIs block US (GitHub runner) IPs → data-api host + fallback chains; heartbeat shows sources in use.
+- Coin drops out of the top 50 while a trade is open → trade is still tracked to the end.
+- Coin missing on a fallback exchange / derivatives source → reported, never silent.
+- 50 coins every 60 s → parallel fetching, caching (1h candles only refreshed when a new 1h candle closes), rate-limit headers respected, cycle under 45 s.
+- Many alerts at once → Telegram send throttle (~1 msg/s) + 429 handling.
+- SHORT signals on coins without a futures market → still labelled "Futures only"; if futures listing is known absent, no SHORT alert (interpreted).
+- Telegram send fails → trade not recorded, cooldown not started.
+- Stale/duplicate/NaN candles → rejected.
+- Public-repo scheduled workflows can be disabled after 60 days of no activity → hourly state commits keep activity; guide covers re-enabling.
+
+## Seed Data
+None. state.json in the repo is live production state and must NOT be modified in this environment.
