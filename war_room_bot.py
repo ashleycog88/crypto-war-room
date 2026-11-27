@@ -1,10 +1,13 @@
-import os, json, time
+import os, re, json, time
 from datetime import datetime, timezone
 import ccxt, pandas as pd, numpy as np, requests
 from openai import OpenAI
 
-TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TG_CHAT = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+_raw_tok = os.getenv("TELEGRAM_BOT_TOKEN", "")
+_m = re.search(r"(\d+:[A-Za-z0-9_-]+)", _raw_tok)
+TG_TOKEN = _m.group(1) if _m else _raw_tok.strip()
+TG_CHAT = re.sub(r"[^\d-]", "", os.getenv("TELEGRAM_CHAT_ID", ""))
+
 LLM_KEY = os.getenv("LLM_API_KEY", "").strip()
 LLM_URL = os.getenv("LLM_BASE_URL", "https://openai.com").strip()
 LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini").strip()
@@ -29,13 +32,15 @@ def save_state(state):
 
 def send_tg(text):
     if not TG_TOKEN or not TG_CHAT:
+        print(f"Missing TG creds: tok_len={len(TG_TOKEN)}, chat={TG_CHAT}")
         return
     try:
-        requests.post(
+        r = requests.post(
             f"https://telegram.org{TG_TOKEN}/sendMessage",
             json={"chat_id": TG_CHAT, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
             timeout=15
         )
+        print("TG status:", r.status_code, r.text[:120])
     except Exception as e:
         print("TG error:", e)
 
@@ -186,3 +191,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+                
