@@ -22,7 +22,7 @@
    "btc_regime":"flat",
    "ai":"UNAVAILABLE",
    "tp1_hit":false,
-   "checked_until":1795814400000,
+   "checked_until":1795815300000,
    "status":"OPEN",
    "exclude_from_scoreboard":true
   },
@@ -47,7 +47,7 @@
    "btc_regime":"flat",
    "ai":"UNAVAILABLE",
    "tp1_hit":false,
-   "checked_until":1795814400000,
+   "checked_until":1795815300000,
    "status":"OPEN",
    "exclude_from_scoreboard":true
   },
@@ -72,7 +72,7 @@
    "btc_regime":"flat",
    "ai":"UNAVAILABLE",
    "tp1_hit":false,
-   "checked_until":1795814400000,
+   "checked_until":1795815300000,
    "status":"OPEN",
    "exclude_from_scoreboard":true
   },
@@ -97,7 +97,7 @@
    "btc_regime":"flat",
    "ai":"UNAVAILABLE",
    "tp1_hit":false,
-   "checked_until":1795814400000,
+   "checked_until":1795815300000,
    "status":"OPEN",
    "exclude_from_scoreboard":true
   },
@@ -122,32 +122,7 @@
    "btc_regime":"flat",
    "ai":"UNAVAILABLE",
    "tp1_hit":false,
-   "checked_until":1795814400000,
-   "status":"OPEN",
-   "exclude_from_scoreboard":true
-  },
-  {
-   "id":"MMT/USDT-1795810800000",
-   "symbol":"MMT/USDT",
-   "dir":"SHORT",
-   "grade":"B",
-   "score":70,
-   "base_score":70,
-   "deriv_adj":0,
-   "entry":0.1599,
-   "sl":0.16303533,
-   "tp1":0.1564163,
-   "tp2":0.15362934,
-   "entry_time":1795811329,
-   "candle_ts":1795810800000,
-   "exchange":"BINANCE",
-   "market":"Futures only",
-   "funding8h":-0.0052830692577834,
-   "oi_chg_1h":null,
-   "btc_regime":"flat",
-   "ai":"UNAVAILABLE",
-   "tp1_hit":false,
-   "checked_until":1795814400000,
+   "checked_until":1795815300000,
    "status":"OPEN",
    "exclude_from_scoreboard":true
   },
@@ -172,7 +147,7 @@
    "btc_regime":"flat",
    "ai":"UNAVAILABLE",
    "tp1_hit":false,
-   "checked_until":1795814400000,
+   "checked_until":1795815300000,
    "status":"OPEN",
    "exclude_from_scoreboard":true
   },
@@ -197,7 +172,7 @@
    "btc_regime":"flat",
    "ai":"UNAVAILABLE",
    "tp1_hit":false,
-   "checked_until":1795814400000,
+   "checked_until":1795815300000,
    "status":"OPEN",
    "exclude_from_scoreboard":true
   },
@@ -222,7 +197,7 @@
    "btc_regime":"flat",
    "ai":"APPROVED",
    "tp1_hit":false,
-   "checked_until":1795814400000,
+   "checked_until":1795815300000,
    "status":"OPEN"
   },
   {
@@ -246,7 +221,7 @@
    "btc_regime":"flat",
    "ai":"UNAVAILABLE",
    "tp1_hit":false,
-   "checked_until":1795814400000,
+   "checked_until":1795815300000,
    "status":"OPEN",
    "exclude_from_scoreboard":true
   },
@@ -271,7 +246,7 @@
    "btc_regime":"down",
    "ai":"UNAVAILABLE",
    "tp1_hit":false,
-   "checked_until":1795814400000,
+   "checked_until":1795815300000,
    "status":"OPEN",
    "exclude_from_scoreboard":true
   },
@@ -296,7 +271,7 @@
    "btc_regime":"down",
    "ai":"UNAVAILABLE",
    "tp1_hit":false,
-   "checked_until":1795814400000,
+   "checked_until":1795815300000,
    "status":"OPEN",
    "exclude_from_scoreboard":true
   },
@@ -321,32 +296,7 @@
    "btc_regime":"down",
    "ai":"UNAVAILABLE",
    "tp1_hit":false,
-   "checked_until":1795814400000,
-   "status":"OPEN",
-   "exclude_from_scoreboard":true
-  },
-  {
-   "id":"INIT/USDT-1795813200000",
-   "symbol":"INIT/USDT",
-   "dir":"SHORT",
-   "grade":"B",
-   "score":70,
-   "base_score":70,
-   "deriv_adj":6,
-   "entry":0.08971,
-   "sl":0.091661211,
-   "tp1":0.087541987,
-   "tp2":0.085807577,
-   "entry_time":1795813549,
-   "candle_ts":1795813200000,
-   "exchange":"BINANCE",
-   "market":"Futures only",
-   "funding8h":0.0001,
-   "oi_chg_1h":null,
-   "btc_regime":"down",
-   "ai":"UNAVAILABLE",
-   "tp1_hit":false,
-   "checked_until":1795814400000,
+   "checked_until":1795815300000,
    "status":"OPEN",
    "exclude_from_scoreboard":true
   },
@@ -371,9 +321,34 @@
    "btc_regime":"down",
    "ai":"UNAVAILABLE",
    "tp1_hit":false,
-   "checked_until":1795814400000,
+   "checked_until":1795815300000,
    "status":"OPEN",
    "exclude_from_scoreboard":true
+  },
+  {
+   "id":"XRP/USDT-1795815000000",
+   "symbol":"XRP/USDT",
+   "dir":"SHORT",
+   "grade":"B",
+   "score":75,
+   "base_score":75,
+   "deriv_adj":6,
+   "entry":0.9503,
+   "sl":0.95297927,
+   "tp1":0.94732303,
+   "tp2":0.94494146,
+   "entry_time":1795815468,
+   "candle_ts":1795815000000,
+   "exchange":"BINANCE",
+   "market":"Futures only",
+   "funding8h":0.0001,
+   "oi_chg_1h":0.32,
+   "btc_regime":"down",
+   "ai":"APPROVED",
+   "ai_note":"APPROVED: Setup aligns with the bearish BTC regime, supported by strong volume, negative order book imbalance, and a favorable risk-reward ratio.",
+   "tp1_hit":false,
+   "checked_until":0,
+   "status":"OPEN"
   }
  ],
  "closed_trades":[
@@ -532,6 +507,68 @@
    "net":-0.652,
    "win":false,
    "exclude_from_scoreboard":true
+  },
+  {
+   "id":"INIT/USDT-1795813200000",
+   "symbol":"INIT/USDT",
+   "dir":"SHORT",
+   "grade":"B",
+   "score":70,
+   "base_score":70,
+   "deriv_adj":6,
+   "entry":0.08971,
+   "sl":0.091661211,
+   "tp1":0.087541987,
+   "tp2":0.085807577,
+   "entry_time":1795813549,
+   "candle_ts":1795813200000,
+   "exchange":"BINANCE",
+   "market":"Futures only",
+   "funding8h":0.0001,
+   "oi_chg_1h":null,
+   "btc_regime":"down",
+   "ai":"UNAVAILABLE",
+   "tp1_hit":false,
+   "checked_until":1795814700000,
+   "status":"CLOSED",
+   "exclude_from_scoreboard":true,
+   "exit_reason":"STOP LOSS",
+   "exit":0.091661211,
+   "exit_time":1795815048,
+   "gross":-2.175,
+   "net":-2.275,
+   "win":false
+  },
+  {
+   "id":"MMT/USDT-1795810800000",
+   "symbol":"MMT/USDT",
+   "dir":"SHORT",
+   "grade":"B",
+   "score":70,
+   "base_score":70,
+   "deriv_adj":0,
+   "entry":0.1599,
+   "sl":0.16303533,
+   "tp1":0.1564163,
+   "tp2":0.15362934,
+   "entry_time":1795811329,
+   "candle_ts":1795810800000,
+   "exchange":"BINANCE",
+   "market":"Futures only",
+   "funding8h":-0.0052830692577834,
+   "oi_chg_1h":null,
+   "btc_regime":"flat",
+   "ai":"UNAVAILABLE",
+   "tp1_hit":false,
+   "checked_until":1795815000000,
+   "status":"CLOSED",
+   "exclude_from_scoreboard":true,
+   "exit_reason":"STOP LOSS",
+   "exit":0.16303533,
+   "exit_time":1795815468,
+   "gross":-1.9608,
+   "net":-2.0608,
+   "win":false
   }
  ],
  "last_alert_time":{
@@ -554,7 +591,8 @@
   "LTC/USDT":1795813249,
   "THE/USDT":1795813249,
   "INIT/USDT":1795813549,
-  "ZEC/USDT":1795814149
+  "ZEC/USDT":1795814149,
+  "XRP/USDT":1795815468
  },
  "last_alert_candle":{
   "TRX/USDT":1795810800000,
@@ -576,7 +614,8 @@
   "LTC/USDT":1795812900000,
   "THE/USDT":1795812900000,
   "INIT/USDT":1795813200000,
-  "ZEC/USDT":1795813800000
+  "ZEC/USDT":1795813800000,
+  "XRP/USDT":1795815000000
  },
  "ai_rejected_candle":{
   "UNI/USDT":1795811100000,
@@ -584,7 +623,7 @@
   "LISTA/USDT":1795810800000,
   "BTC/USDT":1795812300000,
   "THE/USDT":1795812600000,
-  "TAO/USDT":1795814400000,
+  "TAO/USDT":1795815300000,
   "INIT/USDT":1795812900000,
   "ZEC/USDT":1795813200000
  },
@@ -736,6 +775,21 @@
     1795814988,
     35588.67,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    35584.43,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    35550.05,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    35543.92,
+    "HYPERLIQUID"
    ]
   ],
   "ETH":[
@@ -817,6 +871,21 @@
    [
     1795814988,
     611877.7,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    611848.5,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    611853.6,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    611689.9,
     "HYPERLIQUID"
    ]
   ],
@@ -900,6 +969,21 @@
     1795814988,
     389028.8,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    389315.6,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    389466.8,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    389391.6,
+    "HYPERLIQUID"
    ]
   ],
   "SOL":[
@@ -981,6 +1065,21 @@
    [
     1795814988,
     4085474.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    4086362.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    4086026.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    4085144.0,
     "HYPERLIQUID"
    ]
   ],
@@ -1064,6 +1163,21 @@
     1795814988,
     62410900.0,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    62412070.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    62396460.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    62424320.0,
+    "HYPERLIQUID"
    ]
   ],
   "BNB":[
@@ -1145,6 +1259,21 @@
    [
     1795814988,
     36921.64,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    36921.59,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    36919.78,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    36920.25,
     "HYPERLIQUID"
    ]
   ],
@@ -1228,6 +1357,21 @@
     1795814988,
     33866060.0,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    33869230.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    33873740.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    33871300.0,
+    "HYPERLIQUID"
    ]
   ],
   "HYPE":[
@@ -1309,6 +1453,21 @@
    [
     1795814988,
     19236730.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    19236880.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    19236910.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    19240570.0,
     "HYPERLIQUID"
    ]
   ],
@@ -1392,6 +1551,21 @@
     1795814988,
     4634029.0,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    4633118.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    4633134.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    4633274.0,
+    "HYPERLIQUID"
    ]
   ],
   "PEPE":[
@@ -1473,6 +1647,21 @@
    [
     1795814988,
     4332765000.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    4331709000.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    4331734000.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    4331773000.0,
     "HYPERLIQUID"
    ]
   ],
@@ -1556,6 +1745,21 @@
     1795814988,
     30975880.0,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    30976400.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    30976210.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    30975820.0,
+    "HYPERLIQUID"
    ]
   ],
   "DOGE":[
@@ -1637,6 +1841,21 @@
    [
     1795814988,
     423142900.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    423152900.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    423156200.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    423169600.0,
     "HYPERLIQUID"
    ]
   ],
@@ -1720,6 +1939,21 @@
     1795814988,
     23148320.0,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    23148040.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    23148040.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    23147180.0,
+    "HYPERLIQUID"
    ]
   ],
   "LINK":[
@@ -1801,6 +2035,21 @@
    [
     1795814988,
     3342493.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    3342509.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    3342503.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    3342071.0,
     "HYPERLIQUID"
    ]
   ],
@@ -1884,6 +2133,21 @@
     1795814988,
     282907500.0,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    282907900.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    282907900.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    282907600.0,
+    "HYPERLIQUID"
    ]
   ],
   "LTC":[
@@ -1965,6 +2229,21 @@
    [
     1795814988,
     317820.6,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    317818.3,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    317816.6,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    317809.3,
     "HYPERLIQUID"
    ]
   ],
@@ -2048,6 +2327,21 @@
     1795814988,
     140602200.0,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    140547400.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    140540900.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    140532300.0,
+    "HYPERLIQUID"
    ]
   ],
   "INIT":[
@@ -2129,6 +2423,21 @@
    [
     1795814988,
     12250980.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    12253980.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    12293130.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    12316430.0,
     "HYPERLIQUID"
    ]
   ],
@@ -2212,6 +2521,21 @@
     1795814988,
     23660680.0,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    23698670.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    23757640.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    23780610.0,
+    "HYPERLIQUID"
    ]
   ],
   "BLUR":[
@@ -2293,6 +2617,21 @@
    [
     1795814988,
     225701800.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    228065000.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    229211100.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    230576100.0,
     "HYPERLIQUID"
    ]
   ],
@@ -2376,6 +2715,21 @@
     1795814988,
     99414.96,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    99416.06,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    99418.77,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    99454.81,
+    "HYPERLIQUID"
    ]
   ],
   "WLD":[
@@ -2457,6 +2811,21 @@
    [
     1795814988,
     79524120.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    79516220.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    79542320.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    79545960.0,
     "HYPERLIQUID"
    ]
   ],
@@ -2540,6 +2909,21 @@
     1795814988,
     290092200.0,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    290120200.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    289049400.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    288967900.0,
+    "HYPERLIQUID"
    ]
   ],
   "PUMP":[
@@ -2621,6 +3005,21 @@
    [
     1795814988,
     16500680000.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    16501210000.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    16498400000.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    16498140000.0,
     "HYPERLIQUID"
    ]
   ],
@@ -2704,6 +3103,21 @@
     1795814988,
     366182.2,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    366197.9,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    366167.6,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    366168.4,
+    "HYPERLIQUID"
    ]
   ],
   "INJ":[
@@ -2785,6 +3199,21 @@
    [
     1795814988,
     744360.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    744379.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    744370.6,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    744372.2,
     "HYPERLIQUID"
    ]
   ],
@@ -2868,6 +3297,21 @@
     1795814988,
     16775.78,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    16780.02,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    16779.83,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    16780.15,
+    "HYPERLIQUID"
    ]
   ],
   "ZRO":[
@@ -2949,6 +3393,21 @@
    [
     1795814988,
     34630580.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    34629970.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    34628390.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    34628580.0,
     "HYPERLIQUID"
    ]
   ],
@@ -3032,6 +3491,21 @@
     1795814988,
     1755340.0,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    1755434.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    1755424.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    1755429.0,
+    "HYPERLIQUID"
    ]
   ],
   "XLM":[
@@ -3113,6 +3587,21 @@
    [
     1795814988,
     39380880.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    39375550.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    39369400.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    39369420.0,
     "HYPERLIQUID"
    ]
   ],
@@ -3196,6 +3685,21 @@
     1795814988,
     9470172.0,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    9470052.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    9469908.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    9469944.0,
+    "HYPERLIQUID"
    ]
   ],
   "SEI":[
@@ -3277,6 +3781,21 @@
    [
     1795814988,
     41887640.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    41887120.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    41888480.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    41874180.0,
     "HYPERLIQUID"
    ]
   ],
@@ -3360,6 +3879,21 @@
     1795814988,
     99187740.0,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    99185360.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    99185430.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    99186710.0,
+    "HYPERLIQUID"
    ]
   ],
   "SKY":[
@@ -3441,6 +3975,21 @@
    [
     1795814988,
     62509410.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    61952780.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    61606590.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    61618870.0,
     "HYPERLIQUID"
    ]
   ],
@@ -3524,6 +4073,21 @@
     1795814988,
     165554900.0,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    165548300.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    165517300.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    165539100.0,
+    "HYPERLIQUID"
    ]
   ],
   "ONDO":[
@@ -3604,6 +4168,21 @@
    ],
    [
     1795814988,
+    28835230.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    28835230.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    28835350.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
     28835230.0,
     "HYPERLIQUID"
    ]
@@ -3688,6 +4267,21 @@
     1795814988,
     10188350.0,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    10175770.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    10177120.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    10187750.0,
+    "HYPERLIQUID"
    ]
   ],
   "FIL":[
@@ -3769,6 +4363,21 @@
    [
     1795814988,
     4631066.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    4631163.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    4630894.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    4630916.0,
     "HYPERLIQUID"
    ]
   ],
@@ -3852,6 +4461,21 @@
     1795814988,
     63747760.0,
     "HYPERLIQUID"
+   ],
+   [
+    1795815228,
+    63747630.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815468,
+    63747900.0,
+    "HYPERLIQUID"
+   ],
+   [
+    1795815708,
+    63746090.0,
+    "HYPERLIQUID"
    ]
   ],
   "MMT":[
@@ -3933,6 +4557,21 @@
    [
     1795814988,
     19889350.0,
+    "OKX"
+   ],
+   [
+    1795815228,
+    19889350.0,
+    "OKX"
+   ],
+   [
+    1795815468,
+    19979090.0,
+    "OKX"
+   ],
+   [
+    1795815708,
+    20150600.0,
     "OKX"
    ]
   ],
@@ -4016,6 +4655,21 @@
     1795814988,
     460192.7,
     "OKX"
+   ],
+   [
+    1795815228,
+    460192.7,
+    "OKX"
+   ],
+   [
+    1795815468,
+    459015.5,
+    "OKX"
+   ],
+   [
+    1795815708,
+    458964.6,
+    "OKX"
    ]
   ],
   "NIGHT":[
@@ -4097,6 +4751,21 @@
    [
     1795814988,
     90843700.0,
+    "OKX"
+   ],
+   [
+    1795815228,
+    90843700.0,
+    "OKX"
+   ],
+   [
+    1795815468,
+    90899400.0,
+    "OKX"
+   ],
+   [
+    1795815708,
+    90992000.0,
     "OKX"
    ]
   ],
@@ -4180,6 +4849,21 @@
     1795814988,
     1271312000.0,
     "OKX"
+   ],
+   [
+    1795815228,
+    1271312000.0,
+    "OKX"
+   ],
+   [
+    1795815468,
+    1269453000.0,
+    "OKX"
+   ],
+   [
+    1795815708,
+    1264045000.0,
+    "OKX"
    ]
   ],
   "QNT":[
@@ -4261,6 +4945,21 @@
    [
     1795814988,
     7822.1,
+    "OKX"
+   ],
+   [
+    1795815228,
+    7822.1,
+    "OKX"
+   ],
+   [
+    1795815468,
+    7867.1,
+    "OKX"
+   ],
+   [
+    1795815708,
+    7863.0,
     "OKX"
    ]
   ],
@@ -4344,6 +5043,21 @@
     1795814988,
     4397150.0,
     "GATEIO"
+   ],
+   [
+    1795815228,
+    4397150.0,
+    "GATEIO"
+   ],
+   [
+    1795815468,
+    4377430.0,
+    "GATEIO"
+   ],
+   [
+    1795815708,
+    4380180.0,
+    "GATEIO"
    ]
   ],
   "CFG":[
@@ -4425,6 +5139,21 @@
    [
     1795814988,
     2617080.0,
+    "GATEIO"
+   ],
+   [
+    1795815228,
+    2617080.0,
+    "GATEIO"
+   ],
+   [
+    1795815468,
+    2616480.0,
+    "GATEIO"
+   ],
+   [
+    1795815708,
+    2617550.0,
     "GATEIO"
    ]
   ],
@@ -4508,6 +5237,21 @@
     1795814988,
     1147029.0,
     "GATEIO"
+   ],
+   [
+    1795815228,
+    1147029.0,
+    "GATEIO"
+   ],
+   [
+    1795815468,
+    1146508.0,
+    "GATEIO"
+   ],
+   [
+    1795815708,
+    1142169.0,
+    "GATEIO"
    ]
   ],
   "LISTA":[
@@ -4589,6 +5333,21 @@
    [
     1795814988,
     1677730.0,
+    "GATEIO"
+   ],
+   [
+    1795815228,
+    1677730.0,
+    "GATEIO"
+   ],
+   [
+    1795815468,
+    1683070.0,
+    "GATEIO"
+   ],
+   [
+    1795815708,
+    1667530.0,
     "GATEIO"
    ]
   ],
@@ -4672,6 +5431,21 @@
     1795814988,
     3140894.0,
     "GATEIO"
+   ],
+   [
+    1795815228,
+    3140894.0,
+    "GATEIO"
+   ],
+   [
+    1795815468,
+    3142950.0,
+    "GATEIO"
+   ],
+   [
+    1795815708,
+    3194187.0,
+    "GATEIO"
    ]
   ],
   "PORTAL":[
@@ -4754,27 +5528,27 @@
     1795814988,
     110451500.0,
     "KUCOIN_FUTURES"
+   ],
+   [
+    1795815228,
+    110451500.0,
+    "KUCOIN_FUTURES"
+   ],
+   [
+    1795815468,
+    110025800.0,
+    "KUCOIN_FUTURES"
+   ],
+   [
+    1795815708,
+    110277100.0,
+    "KUCOIN_FUTURES"
    ]
   ]
  },
- "last_cycle_time":1795814988,
+ "last_cycle_time":1795815888,
  "last_heartbeat":1795814988,
  "cycle_times":[
-  1795811389,
-  1795811449,
-  1795811509,
-  1795811569,
-  1795811629,
-  1795811689,
-  1795811749,
-  1795811809,
-  1795811869,
-  1795811929,
-  1795811989,
-  1795812049,
-  1795812109,
-  1795812169,
-  1795812229,
   1795812289,
   1795812349,
   1795812409,
@@ -4817,12 +5591,248 @@
   1795814629,
   1795814689,
   1795814749,
-  1795814988
+  1795814988,
+  1795815048,
+  1795815108,
+  1795815168,
+  1795815228,
+  1795815288,
+  1795815348,
+  1795815408,
+  1795815468,
+  1795815528,
+  1795815588,
+  1795815648,
+  1795815708,
+  1795815768,
+  1795815828,
+  1795815888
  ],
- "near_miss":{},
+ "near_miss":{
+  "ZEC/USDT":[
+   "SHORT",
+   60,
+   1795815108
+  ],
+  "SOL/USDT":[
+   "SHORT",
+   60,
+   1795815048
+  ],
+  "XRP/USDT":[
+   "SHORT",
+   60,
+   1795815048
+  ],
+  "BNB/USDT":[
+   "LONG",
+   40,
+   1795815048
+  ],
+  "NEAR/USDT":[
+   "SHORT",
+   45,
+   1795815048
+  ],
+  "HYPE/USDT":[
+   "LONG",
+   45,
+   1795815048
+  ],
+  "PEPE/USDT":[
+   "SHORT",
+   60,
+   1795815348
+  ],
+  "TRX/USDT":[
+   "SHORT",
+   50,
+   1795815048
+  ],
+  "HAEDAL/USDT":[
+   "LONG",
+   60,
+   1795815408
+  ],
+  "LINK/USDT":[
+   "SHORT",
+   45,
+   1795815168
+  ],
+  "ENA/USDT":[
+   "SHORT",
+   30,
+   1795815048
+  ],
+  "MMT/USDT":[
+   "LONG",
+   30,
+   1795815348
+  ],
+  "ADA/USDT":[
+   "SHORT",
+   60,
+   1795815048
+  ],
+  "INIT/USDT":[
+   "SHORT",
+   55,
+   1795815408
+  ],
+  "WLFI/USDT":[
+   "SHORT",
+   30,
+   1795815348
+  ],
+  "BLUR/USDT":[
+   "LONG",
+   40,
+   1795815048
+  ],
+  "WLD/USDT":[
+   "SHORT",
+   40,
+   1795815648
+  ],
+  "PUMP/USDT":[
+   "SHORT",
+   45,
+   1795815048
+  ],
+  "AAVE/USDT":[
+   "LONG",
+   55,
+   1795815768
+  ],
+  "INJ/USDT":[
+   "SHORT",
+   55,
+   1795815168
+  ],
+  "BCH/USDT":[
+   "SHORT",
+   60,
+   1795815648
+  ],
+  "ZRO/USDT":[
+   "LONG",
+   55,
+   1795815348
+  ],
+  "CFG/USDT":[
+   "LONG",
+   45,
+   1795815048
+  ],
+  "AVAX/USDT":[
+   "SHORT",
+   45,
+   1795815348
+  ],
+  "HEI/USDT":[
+   "LONG",
+   40,
+   1795815048
+  ],
+  "SKY/USDT":[
+   "LONG",
+   50,
+   1795815228
+  ],
+  "XLM/USDT":[
+   "SHORT",
+   60,
+   1795815048
+  ],
+  "LISTA/USDT":[
+   "SHORT",
+   55,
+   1795815048
+  ],
+  "SSV/USDT":[
+   "LONG",
+   55,
+   1795815048
+  ],
+  "SEI/USDT":[
+   "SHORT",
+   30,
+   1795815048
+  ],
+  "HBAR/USDT":[
+   "LONG",
+   25,
+   1795815048
+  ],
+  "ONE/USDT":[
+   "SHORT",
+   45,
+   1795815048
+  ],
+  "QNT/USDT":[
+   "LONG",
+   55,
+   1795815708
+  ],
+  "THE/USDT":[
+   "LONG",
+   40,
+   1795815048
+  ],
+  "BIGTIME/USDT":[
+   "LONG",
+   40,
+   1795815048
+  ],
+  "ONDO/USDT":[
+   "SHORT",
+   25,
+   1795815048
+  ],
+  "TRUMP/USDT":[
+   "LONG",
+   25,
+   1795815048
+  ],
+  "ARB/USDT":[
+   "SHORT",
+   45,
+   1795815648
+  ],
+  "BTC/USDT":[
+   "SHORT",
+   55,
+   1795815288
+  ],
+  "PORTAL/USDT":[
+   "LONG",
+   55,
+   1795815288
+  ],
+  "UNI/USDT":[
+   "LONG",
+   60,
+   1795815408
+  ],
+  "SUI/USDT":[
+   "LONG",
+   40,
+   1795815348
+  ],
+  "NIGHT/USDT":[
+   "LONG",
+   60,
+   1795815348
+  ],
+  "FIL/USDT":[
+   "SHORT",
+   40,
+   1795815348
+  ]
+ },
  "hour_stats":{
-  "alerts":0,
-  "ai_rejected":0,
+  "alerts":1,
+  "ai_rejected":3,
   "ai_unclear":0
  },
  "outbox":[],
