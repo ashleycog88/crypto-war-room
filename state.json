@@ -1,39 +1,5 @@
 {
-  "active_trades": [
-    {
-      "symbol": "XRP/USDT",
-      "dir": "LONG",
-      "entry": 0.9655,
-      "sl": 0.961646,
-      "tp1": 0.969782,
-      "tp2": 0.973207
-    },
-    {
-      "symbol": "DOGE/USDT",
-      "dir": "LONG",
-      "entry": 0.05795,
-      "sl": 0.05774,
-      "tp1": 0.058183,
-      "tp2": 0.05837
-    }
-  ],
-  "closed_trades": [
-    {
-      "symbol": "SOL/USDT",
-      "dir": "LONG",
-      "entry": 71.3,
-      "sl": 71.066199,
-      "tp1": 71.559778,
-      "tp2": 71.767601,
-      "exit": 73.19,
-      "status": "TP2 HIT",
-      "pnl": 2.65
-    }
-  ],
-  "last_alert_time": {
-    "SOL/USDT": 1795740535,
-    "XRP/USDT": 1795757236,
-    "DOGE/USDT": 1795757236
-  },
-  "booted": true
+  "active_trades": [],
+  "closed_trades": [],
+  "last_alert_time": {}
 }
