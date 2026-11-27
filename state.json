@@ -1,5 +1,6 @@
 {
   "active_trades": [],
   "closed_trades": [],
-  "last_alert_time": {}
+  "last_alert_time": {},
+  "booted": true
 }
