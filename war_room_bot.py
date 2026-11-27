@@ -1,11 +1,11 @@
-import os, re, json, time
+import os, re, json, time, http.client
 from datetime import datetime, timezone
-import ccxt, pandas as pd, numpy as np, requests
+import ccxt, pandas as pd, numpy as np
 from openai import OpenAI
 
 _raw_tok = os.getenv("TELEGRAM_BOT_TOKEN", "")
-_m = re.search(r"(\d+:[A-Za-z0-9_-]+)", _raw_tok)
-TG_TOKEN = re.sub(r"[^0-9A-Za-z:_-]", "", _m.group(1) if _m else _raw_tok).lstrip(":_-")
+_m = re.search(r"(\d{6,15}:[A-Za-z0-9_-]{25,60})", _raw_tok)
+TG_TOKEN = _m.group(1) if _m else ""
 TG_CHAT = re.sub(r"[^\d-]", "", os.getenv("TELEGRAM_CHAT_ID", ""))
 
 LLM_KEY = os.getenv("LLM_API_KEY", "").strip()
@@ -32,15 +32,15 @@ def save_state(state):
 
 def send_tg(text):
     if not TG_TOKEN or not TG_CHAT:
-        print(f"Missing TG creds: tok_len={len(TG_TOKEN)}, chat={TG_CHAT}")
+        print(f"TG_MISSING: raw_len={len(_raw_tok)}, match={bool(_m)}, chat={TG_CHAT}")
         return
     try:
-        r = requests.post(
-            f"https://telegram.org{TG_TOKEN}/sendMessage",
-            json={"chat_id": TG_CHAT, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
-            timeout=15
-        )
-        print("TG status:", r.status_code, r.text[:120])
+        conn = http.client.HTTPSConnection("api.telegram.org", timeout=15)
+        body = json.dumps({"chat_id": TG_CHAT, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True})
+        conn.request("POST", f"/bot{TG_TOKEN}/sendMessage", body=body, headers={"Content-Type": "application/json"})
+        res = conn.getresponse()
+        print("TG_HTTP:", res.status, res.read().decode("utf-8", errors="ignore")[:120])
+        conn.close()
     except Exception as e:
         print("TG error:", e)
 
@@ -85,8 +85,8 @@ def scan_pair(ex, sym):
     ob_imb = 0.0
     try:
         ob = ex.fetch_order_book(sym, limit=10)
-        bv = sum(float(b[1]) for b in ob["bids"][:10])
-        av = sum(float(a[1]) for a in ob["asks"][:10])
+        bv = sum(float(b) for b in ob["bids"][:10])
+        av = sum(float(a) for a in ob["asks"][:10])
         if (bv + av) > 0:
             ob_imb = (bv - av) / (bv + av)
     except Exception:
@@ -135,7 +135,7 @@ def ai_review(setup):
             max_tokens=110,
             temperature=0.2
         )
-        txt = res.choices[0].message.content.strip()
+        txt = res.choices.message.content.strip()
         return (not txt.upper().startswith("REJECTED")), txt
     except Exception:
         return True, fb
@@ -191,4 +191,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-                
+    
