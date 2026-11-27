@@ -5,7 +5,7 @@ from openai import OpenAI
 
 _raw_tok = os.getenv("TELEGRAM_BOT_TOKEN", "")
 _m = re.search(r"(\d+:[A-Za-z0-9_-]+)", _raw_tok)
-TG_TOKEN = re.sub(r"[^0-9A-Za-z:_-]", "", _m.group(1) if _m else _raw_tok)
+TG_TOKEN = re.sub(r"[^0-9A-Za-z:_-]", "", _m.group(1) if _m else _raw_tok).lstrip(":_-")
 TG_CHAT = re.sub(r"[^\d-]", "", os.getenv("TELEGRAM_CHAT_ID", ""))
 
 LLM_KEY = os.getenv("LLM_API_KEY", "").strip()
