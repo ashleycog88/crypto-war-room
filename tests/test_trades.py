@@ -43,7 +43,7 @@ def test_jrn19_long_tp1_then_tp2():
     ev = run(t, bars((102.1, 100.5), (101.0, 100.2), (103.7, 101.5)))
     assert ev[0]["type"] == "TP1"
     msg = wr.format_tp1(t, ev[0])
-    assert "TP1 HIT" in msg and "SL moved to breakeven" in msg
+    assert "TP1 HIT" in msg and "HALF" in msg and "Move your stop loss to <b>100.00</b>" in msg and "can't lose money now" in msg
     c = closes(ev)[0]
     assert c["reason"] == "TP2 HIT" and round(c["gross"], 2) == 2.80 and round(c["net"], 2) == 2.60
 
@@ -158,9 +158,9 @@ def test_jrn25_separate_records_and_small_gross_is_loss(cfg, tg):
         spot.trade_candles[sym] = c
     spot.price = {s: 100.5 for s in spot.pairs}
     bot.check_trades(spot, spot.prices(spot.pairs), now)
-    closes_ = tg.texts("CLOSED")
+    closes_ = tg.texts("trade finished")
     assert len(closes_) == 3
-    assert "A: 1W/1L (50%)" in closes_[-1] and "B: 1W/0L (100%)" in closes_[-1]
+    assert "A-grade: 1 win · 1 loss (50%)" in closes_[-1] and "B-grade: 1 win · 0 losses (100%)" in closes_[-1]
     assert bot.state["active_trades"] == [] and len(bot.state["closed_trades"]) == 3
     t = dict(symbol="XRP/USDT", dir="LONG", grade="B", entry=100.0, sl=98.2, tp1=102.0, tp2=103.6, entry_time=ent,
              tp1_hit=False, checked_until=0)
@@ -192,6 +192,6 @@ def test_jrn50_trade_tracked_after_coin_leaves_list(cfg, tg, monkeypatch):
     e_ms = (t["entry_time"] * 1000 // TF + 1) * TF
     spot.trade_candles["DOGE/USDT"] = [[float(e_ms), 100, 102.2, 100.1, 102, 1], [float(e_ms + TF), 100, 103.8, 101, 103, 1]]
     bot.cycle(now=spot.now)
-    assert any("DOGE/USDT" in x for x in tg.texts("TP1 HIT"))
-    assert any("DOGE/USDT" in x and "TP2 HIT" in x for x in tg.texts("CLOSED"))
-    assert not [x for x in tg.texts("DOGE/USDT") if "-GRADE " in x.split("\n")[0] and "CLOSED" not in x]
+    assert any("DOGE" in x for x in tg.texts("reached Take profit 1"))
+    assert any("DOGE" in x and "hit Take profit 2" in x for x in tg.texts("trade finished"))
+    assert not [x for x in tg.texts("/100)") if "DOGE" in x]

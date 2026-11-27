@@ -53,8 +53,9 @@ def test_jrn45_watchdog_and_diag_workflows():
 
 
 def test_jrn38_repo_tree():
-    for bad in ("frontend", "backend", "web", "app"):
-        assert not os.path.isdir(os.path.join(ROOT, bad))
+    tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True).stdout.split()
+    for bad in ("frontend/", "backend/", "web/", "app/"):
+        assert not [f for f in tracked if f.startswith(bad)], bad
     if os.path.isdir(os.path.join(ROOT, ".git")):
         r = subprocess.run(["git", "diff", "--quiet", "HEAD", "--", "state.json"], cwd=ROOT)
         assert r.returncode == 0, "state.json was modified"
@@ -74,12 +75,12 @@ def test_jrn39_second_deriv_source_used_and_shown(cfg, tg, monkeypatch):
     now = spot.now
     bot.state["oi_snap"]["BTC"] = [[int(now - 3600), 100.0, "SECOND"]]
     bot.cycle(now=now)
-    a = tg.texts("A-GRADE")[0]
-    assert "OI +3.0% 1h" in a and "Funding +0.0100%/8h" in a and "BTC " in a and "(SECOND)" in a
+    a = tg.texts("A-GRADE ·")[0]
+    assert "OI +3.0% 1h" in a and "Funding +0.0100%/8h" in a and "BTC " in a and "via Second" in a
     assert "85/100" in a and bot.deriv.primary == "SECOND"
     assert bot.state["active_trades"][0]["score"] == 85
-    hb = tg.texts("BOT ALIVE")[0]
-    assert "Derivatives: SECOND" in hb
+    hb = tg.texts("times this hour")[0]
+    assert "✅ Derivatives: Second" in hb
 
 
 def test_deriv_score_switch_changes_score():
@@ -100,9 +101,9 @@ def test_jrn40_all_deriv_fail(cfg, tg, monkeypatch):
     install_scores(monkeypatch, spot, {"BTC/USDT": (85, 0)})
     bot = make_bot(cfg, spot, deriv_sources=[("A", failing_source), ("B", failing_source)])
     bot.cycle(now=spot.now)
-    a = tg.texts("A-GRADE")[0]
+    a = tg.texts("A-GRADE ·")[0]
     assert "Funding n/a" in a and "OI n/a" in a
-    assert "Derivatives: none" in tg.texts("BOT ALIVE")[0]
+    assert "Derivatives: none" in tg.texts("times this hour")[0]
 
 
 def test_hyperliquid_symbol_mapping():
@@ -136,12 +137,13 @@ def test_jrn32_jrn42_heartbeat_contents(cfg, tg, monkeypatch):
     bot.cycle(now=spot.now + 60)
     bot.state["last_heartbeat"] = 0
     bot.cycle(now=spot.now + 120)
-    hb = tg.texts("BOT ALIVE")[0]
-    assert "Scan cycles last hour: <b>3</b>" in hb
-    assert "BTC/USDT LONG 60, ETH/USDT SHORT 55, SOL/USDT LONG 40" in hb and "XRP" not in hb.split("near-misses")[1].split("\n")[0]
-    assert "Spot data: KUCOIN" in hb and "Derivatives: none" in hb and "Open trades: 0" in hb
-    assert "A: 0W/0L" in hb and "B: 0W/0L" in hb and "AI: unavailable (no key)" in hb
-    assert "BNB/USDT unavailable" in hb
+    hb = tg.texts("times this hour")[0]
+    assert "BOT ALIVE" in hb and "Checked 5 coins 3 times this hour" in hb
+    assert "Almost alerts (need 65): BTC buy 60, ETH short 55, SOL buy 40" in hb and "XRP" not in hb
+    assert "⚠️ Data: Kucoin (Binance down)" in hb and "❌ Derivatives: none" in hb and "Open trades (0): none" in hb
+    assert "A-grade: 0 wins · 0 losses (no trades yet)" in hb and "❌ AI: no key" in hb
+    assert "Alerts sent: 0 (AI blocked 0)" in hb
+    assert "⚠️ Not available on Kucoin: BNB" in hb
     assert len(hb) < 4096
 
 
@@ -309,3 +311,26 @@ def test_token_cleaning_and_mask(monkeypatch, capsys):
     wr.mask_secrets(c)
     out = capsys.readouterr().out
     assert f"::add-mask::{FAKE_TOKEN}" in out and f"::add-mask::{FAKE_CHAT}" in out
+
+
+def test_l2_heartbeat_counters_reset_even_if_send_fails(cfg, monkeypatch):
+    monkeypatch.setattr(wr, "_http_post", TGRecorder(fail=True))
+    spot = FakeSpot(pairs=["BTC/USDT"])
+    bot = make_bot(cfg, spot)
+    bot.state["hour_stats"]["alerts"] = 5
+    bot.cycle(now=spot.now)
+    assert bot.state["hour_stats"]["alerts"] == 0 and bot.state["last_heartbeat"] == int(spot.now)
+    assert any("BOT ALIVE" in m["text"] for m in bot.state["outbox"])
+
+
+def test_l4_sigint_saves_state(tmp_path):
+    import signal as sg
+    env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
+    env.update({"STATE_FILE": str(tmp_path / "s.json"), "DRY_RUN": "1", "RUN_MINUTES": "5", "SCAN_INTERVAL": "1",
+                "HTTPS_PROXY": "http://127.0.0.1:9", "https_proxy": "http://127.0.0.1:9", "NO_PROXY": ""})
+    p = subprocess.Popen([sys.executable, os.path.join(ROOT, "war_room_bot.py")], env=env, cwd=str(tmp_path),
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    time.sleep(6)
+    p.send_signal(sg.SIGINT)
+    out, _ = p.communicate(timeout=30)
+    assert "Run finished" in out and (tmp_path / "s.json").exists() and p.returncode == 0

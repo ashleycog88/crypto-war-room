@@ -65,8 +65,8 @@ def test_jrn11_ai_approved_sentence_in_alert(cfg, tg, monkeypatch, ai_env):
     calls, made = ai_env("APPROVED: momentum aligned, watch BTC dominance.")
     bot, spot = alert_bot(ai_cfg(cfg), monkeypatch)
     bot.cycle(now=spot.now)
-    a = tg.texts("A-GRADE")
-    assert len(a) == 1 and "APPROVED: momentum aligned, watch BTC dominance." in a[0]
+    a = tg.texts("A-GRADE ·")
+    assert len(a) == 1 and "✅ looks good — “momentum aligned, watch BTC dominance.”" in a[0]
     assert calls[0]["max_tokens"] >= 512 and calls[0]["reasoning_effort"] == "low"
 
 
@@ -74,11 +74,11 @@ def test_jrn12_ai_rejected_drops_alert(cfg, tg, monkeypatch, ai_env):
     ai_env("REJECTED: thin liquidity.")
     bot, spot = alert_bot(ai_cfg(cfg), monkeypatch)
     bot.cycle(now=spot.now)
-    assert tg.texts("A-GRADE") == [] and bot.state["active_trades"] == []
-    hb = tg.texts("BOT ALIVE")[0]
-    assert "AI rejections: 1" in hb
+    assert tg.texts("A-GRADE ·") == [] and bot.state["active_trades"] == []
+    hb = tg.texts("times this hour")[0]
+    assert "AI blocked 1" in hb
     bot.cycle(now=spot.now + 60)  # same closed 5m candle → rejected setup is not re-reviewed or sent
-    assert tg.texts("A-GRADE") == [] and bot.state["active_trades"] == []
+    assert tg.texts("A-GRADE ·") == [] and bot.state["active_trades"] == []
 
 
 @pytest.mark.parametrize("reply,verdict", [("**REJECTED**: nope", "REJECTED"), ("  rejected: thin", "REJECTED"),
@@ -91,7 +91,7 @@ def test_ai_parse_robust(reply, verdict):
 def test_jrn13_no_key_ai_unavailable(cfg, tg, monkeypatch):
     bot, spot = alert_bot(cfg, monkeypatch)
     bot.cycle(now=spot.now)
-    a = tg.texts("A-GRADE")
+    a = tg.texts("A-GRADE ·")
     assert len(a) == 1 and "AI unavailable" in a[0]
 
 
@@ -126,7 +126,7 @@ def test_jrn14_alert_still_sent_on_ai_error(cfg, tg, monkeypatch, ai_env):
     ai_env(ApiErr("boom", 500), ApiErr("boom", 500), ApiErr("boom", 500))
     bot, spot = alert_bot(ai_cfg(cfg), monkeypatch)
     bot.cycle(now=spot.now)
-    a = tg.texts("A-GRADE")
+    a = tg.texts("A-GRADE ·")
     assert len(a) == 1 and "AI unavailable" in a[0] and len(bot.state["active_trades"]) == 1
 
 
@@ -168,8 +168,38 @@ def test_ai_throttle(cfg, ai_env):
     ai_env("APPROVED: a", "APPROVED: b")
     ai = wr.AIReviewer(ai_cfg(cfg))
     assert ai.review({})[0] == "APPROVED"
-    v, note = ai.review({})
-    assert v == "UNAVAILABLE" and "throttled" in note
+    v, note = ai.review({}, start_by=time.time())
+    assert v == "DEFER"  # own throttle never yields "AI unavailable"
+
+
+def test_jrn68_throttle_waits_or_defers_never_skips(cfg, tg, monkeypatch, ai_env):
+    monkeypatch.setattr(wr, "AI_MIN_GAP_S", 1)
+    monkeypatch.setattr(wr, "CYCLE_AI_BUDGET_S", 2.5)
+    calls, _ = ai_env(*(["APPROVED: fine"] * 5 + ["REJECTED: thin"] + ["APPROVED: fine"] * 2))
+    pairs = [f"C{i}/USDT" for i in range(8)]
+    bot, spot = alert_bot(ai_cfg(cfg), monkeypatch, pairs=pairs)
+    bot.state["v10_live_sent"] = bot.state["guide_sent"] = True
+    bot.state["last_heartbeat"] = spot.now
+    bot.cycle(now=spot.now)
+    first = len(calls)
+    assert 2 <= first < 8 and len(bot.state["active_trades"]) == len(tg.texts("/100)"))
+    for k in range(1, 5):
+        bot.cycle(now=spot.now + 10 * k)  # same closed 5m candle
+    assert len(calls) == 8
+    alerts = tg.texts("/100)")
+    assert len(alerts) == 7 and all("looks good" in a for a in alerts) and not tg.texts("AI unavailable")
+    assert len(bot.state["active_trades"]) == 7 and bot.state["hour_stats"]["ai_rejected"] == 1
+
+
+def test_jrn69_unavailable_only_for_no_key_or_backoff(cfg, tg, monkeypatch, ai_env):
+    bot, spot = alert_bot(cfg, monkeypatch)
+    bot.cycle(now=spot.now)
+    assert "AI unavailable (no key)" in tg.texts("/100)")[0]
+    ai_env("APPROVED: x")
+    bot2, spot2 = alert_bot(ai_cfg(cfg), monkeypatch, pairs=["ETH/USDT"])
+    bot2.ai.backoff_until = time.time() + 300
+    bot2.cycle(now=spot2.now)
+    assert "AI unavailable (rate-limited, pausing)" in tg.texts("/100)")[-1]
 
 
 def _balanced(text):
@@ -186,7 +216,7 @@ def test_jrn16_hostile_ai_text(cfg, tg, monkeypatch, ai_env):
     ai_env("APPROVED: " + HOSTILE)
     bot, spot = alert_bot(ai_cfg(cfg), monkeypatch)
     bot.cycle(now=spot.now)
-    msg = tg.texts("A-GRADE")[0]
+    msg = tg.texts("A-GRADE ·")[0]
     assert "<script>" not in msg and "&lt;script&gt;" in msg and "a &lt; b &amp; c &gt; d" in msg
     assert len(msg) <= 4096 and _balanced(msg)
     assert tg.payloads[-2 if "BOT ALIVE" in tg.payloads[-1]["text"] else -1].get("parse_mode") == "HTML"
@@ -228,7 +258,7 @@ def test_jrn10_no_duplicates_60_cycles(cfg, tg, monkeypatch):
     for i in range(60):
         spot.now = t0 + i * 60
         bot.cycle(now=spot.now)
-    assert len(tg.texts("A-GRADE")) == 1 and len(bot.state["active_trades"]) == 1
+    assert len(tg.texts("A-GRADE ·")) == 1 and len(bot.state["active_trades"]) == 1
 
 
 def test_same_closed_candle_never_alerts_twice(cfg, tg, monkeypatch):
@@ -237,7 +267,7 @@ def test_same_closed_candle_never_alerts_twice(cfg, tg, monkeypatch):
     bot.state["active_trades"] = []
     bot.state["last_alert_time"] = {}
     bot.cycle(now=spot.now + 1)
-    assert len(tg.texts("A-GRADE")) == 1
+    assert len(tg.texts("A-GRADE ·")) == 1
 
 
 def test_jrn41_failed_delivery_not_recorded_then_retried(cfg, monkeypatch):
@@ -249,16 +279,58 @@ def test_jrn41_failed_delivery_not_recorded_then_retried(cfg, monkeypatch):
     rec.fail = False
     bot.cycle(now=spot.now + 60)
     bot.cycle(now=spot.now + 120)
-    assert len(rec.texts("A-GRADE")) == 1 and len(bot.state["active_trades"]) == 1
+    assert len(rec.texts("A-GRADE ·")) == 1 and len(bot.state["active_trades"]) == 1
 
 
-def test_jrn53_ten_alerts_throttled(cfg, tg, monkeypatch):
+def test_jrn53_ten_alerts_reviewed_or_deferred_and_throttled(cfg, tg, monkeypatch, ai_env):
     monkeypatch.setattr(wr, "TG_GAP_S", 1.05)
+    monkeypatch.setattr(wr, "AI_MIN_GAP_S", 0)
+    calls, _ = ai_env(*(["APPROVED: fine"] * 10))
     pairs = [f"C{i}/USDT" for i in range(10)]
-    bot, spot = alert_bot(cfg, monkeypatch, pairs=pairs)
-    bot.state["v10_live_sent"] = True
+    bot, spot = alert_bot(ai_cfg(cfg), monkeypatch, pairs=pairs)
+    bot.state["v10_live_sent"] = bot.state["guide_sent"] = True
     bot.state["last_heartbeat"] = spot.now
     bot.cycle(now=spot.now)
-    assert len(tg.texts("A-GRADE")) == 10 and len(bot.state["active_trades"]) == 10
+    alerts = tg.texts("/100)")
+    assert len(calls) == 8 and len(alerts) == 8 and all("looks good" in a for a in alerts)  # 8/min cap
+    assert len(bot.state["active_trades"]) == 8 and not tg.texts("AI unavailable")  # other 2 deferred
     gaps = [b - a for a, b in zip(tg.times, tg.times[1:])]
     assert all(g >= 1.0 for g in gaps)
+
+
+def test_h1_unclear_retried_then_dropped(cfg, tg, monkeypatch, ai_env):
+    calls, _ = ai_env("Looks fine to me", "still not sure")
+    bot, spot = alert_bot(ai_cfg(cfg), monkeypatch)
+    bot.state["last_heartbeat"] = spot.now
+    bot.cycle(now=spot.now)
+    assert len(calls) == 2 and "EXACTLY" in calls[1]["messages"][0]["content"]
+    assert tg.texts("/100)") == [] and bot.state["active_trades"] == []
+    assert bot.state["hour_stats"]["ai_unclear"] == 1
+    ai_env("Hmm", "APPROVED: ok now")
+    bot2, spot2 = alert_bot(ai_cfg(cfg), monkeypatch, pairs=["ETH/USDT"])
+    bot2.cycle(now=spot2.now)
+    assert len(tg.texts("looks good")) == 1
+
+
+def test_h1_migration_excludes_unreviewed_trades(cfg, tg, monkeypatch):
+    st = wr.empty_state()
+    st["active_trades"] = [dict(symbol="TRX/USDT", dir="SHORT", grade="A", entry=1.0, sl=1.01, tp1=0.99, tp2=0.98,
+                                entry_time=int(time.time()) - 60, ai="UNAVAILABLE", exchange="BINANCE")]
+    st["closed_trades"] = [dict(symbol="ETH/USDT", grade="A", net=1.5, ai="UNAVAILABLE"),
+                           dict(symbol="SOL/USDT", grade="B", net=-1.0, ai="APPROVED", ai_note="ok"),
+                           dict(symbol="XRP/USDT", grade="A", net=0.5, ai="UNAVAILABLE", ai_note="AI unavailable")]
+    st["totals"] = {"A": {"w": 2, "l": 0, "net_sum": 2.0}, "B": {"w": 0, "l": 1, "net_sum": -1.0}}
+    spot = FakeSpot(pairs=["TRX/USDT"])
+    bot = wr.Bot(ai_cfg(cfg), state=wr.upgrade_state(st), spot=wr.SpotRouter(factories=[("BINANCE", lambda: spot)]),
+                 deriv=wr.DerivRouter(sources=[("N", lambda s, c: {})]))
+    bot.start()
+    assert bot.state["active_trades"][0]["exclude_from_scoreboard"]
+    assert bot.state["closed_trades"][0]["exclude_from_scoreboard"] and "exclude_from_scoreboard" not in bot.state["closed_trades"][2]
+    assert bot.state["totals"]["A"] == {"w": 1, "l": 0, "net_sum": 0.5} and bot.state["totals"]["B"]["l"] == 1
+    t = bot.state["active_trades"][0]
+    e_ms = (t["entry_time"] * 1000 // 300_000 + 1) * 300_000
+    spot.trade_candles["TRX/USDT"] = [[float(e_ms), 1, 1.02, 0.999, 1.01, 1]]
+    spot.now = e_ms / 1000 + 400
+    bot.check_trades(spot, {"TRX/USDT": 1.0}, spot.now)
+    c = tg.texts("trade finished")[0]
+    assert "not AI-checked" in c and bot.state["totals"]["A"]["l"] == 0

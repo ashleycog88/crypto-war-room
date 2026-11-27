@@ -1,5 +1,6 @@
 """Market data, scoring, grades, coin universe, labels (JRN-1..9, 48, 49, 51)."""
 import math
+import time
 
 import numpy as np
 import pandas as pd
@@ -97,14 +98,14 @@ def test_jrn6_bad_candles_skipped_with_reason(cfg, tg, capsys):
     assert "df5m" in res["BTC/USDT"]
 
 
-@pytest.mark.parametrize("ls,ss,grade,first", [(85, 10, "A", "A-GRADE 85/100"), (10, 70, "B", "B-GRADE 70/100"),
-                                               (80, 0, "A", "A-GRADE 80/100"), (65, 0, "B", "B-GRADE 65/100")])
+@pytest.mark.parametrize("ls,ss,grade,first", [(85, 10, "A", "A-GRADE · strong setup (85/100)"), (10, 70, "B", "B-GRADE · okay setup (70/100)"),
+                                               (80, 0, "A", "A-GRADE · strong setup (80/100)"), (65, 0, "B", "B-GRADE · okay setup (65/100)")])
 def test_jrn7_8_9_grades_in_first_line(cfg, tg, monkeypatch, ls, ss, grade, first):
     spot = FakeSpot(pairs=["BTC/USDT"])
     install_scores(monkeypatch, spot, {"BTC/USDT": (ls, ss)})
     bot = make_bot(cfg, spot)
     bot.cycle(now=spot.now)
-    alerts = tg.texts("-GRADE")
+    alerts = tg.texts("/100)")
     assert len(alerts) == 1
     assert first in alerts[0].split("\n")[0]
     assert bot.state["active_trades"][0]["grade"] == grade
@@ -116,7 +117,7 @@ def test_jrn9_60_is_near_miss_not_alert(cfg, tg, monkeypatch):
     bot = make_bot(cfg, spot)
     bot.state["last_heartbeat"] = spot.now
     bot.cycle(now=spot.now)
-    assert tg.texts("-GRADE") == []
+    assert tg.texts("/100)") == []
     assert bot.state["near_miss"]["BTC/USDT"][:2] == ["LONG", 60]
     assert wr.grade_for(79) == "B" and wr.grade_for(64) is None
 
@@ -132,7 +133,7 @@ def test_tie_sends_nothing(cfg, tg, monkeypatch):
     install_scores(monkeypatch, spot, {"BTC/USDT": (70, 70)})
     bot = make_bot(cfg, spot)
     bot.cycle(now=spot.now)
-    assert tg.texts("-GRADE") == []
+    assert tg.texts("/100)") == []
 
 
 def test_levels_from_atr():
@@ -184,12 +185,12 @@ def test_jrn51_market_labels_and_no_perp(cfg, tg, monkeypatch):
             ("S2", lambda s, c: {"BTC": {"funding8h": 0.0001, "oi": 1.0}, "ETH": {"funding8h": 0.0001, "oi": 2.0}})]
     bot = make_bot(cfg, spot, deriv_sources=srcs)
     bot.cycle(now=spot.now)
-    alerts = tg.texts("-GRADE")
-    long_ = [a for a in alerts if "BTC/USDT LONG" in a]
-    short = [a for a in alerts if "ETH/USDT SHORT" in a]
+    alerts = tg.texts("/100)")
+    long_ = [a for a in alerts if "BUY BTC" in a]
+    short = [a for a in alerts if "SHORT (SELL) ETH" in a]
     assert long_ and "Spot or Futures" in long_[0]
     assert short and "Futures only" in short[0]
-    assert not [a for a in alerts if "SOL/USDT" in a]
+    assert not [a for a in alerts if "SOL" in a]
 
 
 def test_short_allowed_when_perp_unknown(cfg, tg, monkeypatch):
@@ -197,8 +198,8 @@ def test_short_allowed_when_perp_unknown(cfg, tg, monkeypatch):
     install_scores(monkeypatch, spot, {"SOL/USDT": (0, 85)})
     bot = make_bot(cfg, spot)
     bot.cycle(now=spot.now)
-    a = tg.texts("-GRADE")
-    assert len(a) == 1 and "Futures only (perp listing unverified)" in a[0]
+    a = tg.texts("/100)")
+    assert len(a) == 1 and "Binance Futures only" in a[0] and "check the coin has futures" in a[0]
 
 
 def test_deriv_adjustment_bounds_and_switch():
@@ -207,3 +208,77 @@ def test_deriv_adjustment_bounds_and_switch():
     assert wr.deriv_adjustment("SHORT", 0.0003, 2.5, -0.5, "down") == 10
     assert wr.deriv_adjustment("LONG", None, None, None, "n/a") == 0
     assert wr.norm_base("1000PEPE") == "PEPE" and wr.norm_base("XBT") == "BTC" and wr.norm_base("1INCH") == "1INCH"
+
+
+def test_m1_trade_pinned_to_entry_exchange(cfg, tg):
+    spot = FakeSpot(name="KUCOIN", pairs=["BTC/USDT"])
+    bot = make_bot(cfg, spot)
+    t = dict(symbol="BTC/USDT", dir="LONG", grade="A", entry=100.0, sl=98.2, tp1=102.0, tp2=103.6,
+             entry_time=int(spot.now) - 900, tp1_hit=False, checked_until=0, exchange="BINANCE")
+    bot.state["active_trades"].append(t)
+    spot.trade_candles["BTC/USDT"] = [[float((t["entry_time"] // 300 + 1) * 300_000), 100, 100.2, 90.0, 95, 1]]
+    bot.check_trades(spot, {"BTC/USDT": 95.0}, spot.now)
+    assert bot.state["active_trades"] == [t] and tg.texts("trade finished") == []
+
+
+def test_m2_ccxt_sources_fetched_one_at_a_time(cfg, tg):
+    import threading
+    class Tracked(FakeSpot):
+        live = peak = 0
+        lock = threading.Lock()
+        def ohlcv(self, *a, **k):
+            with self.lock:
+                Tracked.live += 1; Tracked.peak = max(Tracked.peak, Tracked.live)
+            time.sleep(0.005)
+            with self.lock:
+                Tracked.live -= 1
+            return super().ohlcv(*a, **k)
+    spot = Tracked(name="KUCOIN", pairs=wr.ORIGINAL_8)
+    bot = make_bot(cfg, spot)
+    bot.fetch_market(spot, spot.pairs, int(spot.now * 1000))
+    assert Tracked.peak == 1
+
+
+def test_m3_fee_floor(cfg, tg, monkeypatch):
+    assert wr.tp1_too_small("LONG", 100, 100.5, 0.10, 0.05) and not wr.tp1_too_small("LONG", 100, 100.6, 0.10, 0.05)
+    assert wr.tp1_too_small("SHORT", 100, 99.75, 0.10, 0.05) and not wr.tp1_too_small("SHORT", 100, 99.7, 0.10, 0.05)
+    assert not wr.tp1_too_small("LONG", 100, 100.1, 0.10, 0.05, mult=0)
+    spot = FakeSpot(pairs=["BTC/USDT"])  # fake candles: ATR ~0.2 on 100 → TP1 ~0.4% < 0.6%
+    install_scores(monkeypatch, spot, {"BTC/USDT": (85, 0)})
+    bot = make_bot(cfg, spot)
+    bot.cfg.min_tp1_fee_mult = 3
+    bot.cycle(now=spot.now)
+    assert tg.texts("/100)") == [] and bot.state["near_miss"] == {}  # reset by the heartbeat after being shown
+    assert "BTC buy 85 (target too small vs fees)" in tg.texts("times this hour")[0]
+
+
+def test_m4_pegged_coin_skipped(cfg, tg, monkeypatch):
+    spot = FakeSpot(pairs=["GRAM/USDT"])
+    spot.base["GRAM/USDT"] = 0.991
+    install_scores(monkeypatch, spot, {})
+    monkeypatch.setattr(wr, "score_sides", lambda r5, r1, ob: (85, 0, ["x"], []))
+    bot = make_bot(cfg, spot)
+    bot.cycle(now=spot.now)
+    assert tg.texts("/100)") == [] and "GRAM" in tg.texts("Skipped")[0]
+    df = pd.DataFrame({"high": [1.2] * 24, "low": [0.9] * 24})
+    assert not wr.is_pegged(0.991, df) and not wr.is_pegged(1.5, df)
+
+
+def test_m5_order_book_against_penalty(monkeypatch):
+    ls, ss, rl, rs = wr.score_sides(row(), row(close=90, ema21=95, ema50=99), 0.21)
+    assert ss == 10 and "⚠️ order book against this trade" in rs and ls == 15
+    assert wr.score_sides(row(), row(close=90, ema21=95, ema50=99), 0.21, ob_penalty=0)[1] == 25
+    s = wr.sample_messages(wr.Config())["alert_long"]
+    assert "⚠️" not in s
+
+
+def test_l1_prune_and_l3_server_time(cfg, tg):
+    spot = FakeSpot(pairs=["BTC/USDT"])
+    spot.time_offset_ms = -120_000
+    bot = make_bot(cfg, spot)
+    now = time.time()
+    bot.state["last_alert_time"] = {"OLD/USDT": int(now - 49 * 3600), "NEW/USDT": int(now - 3600)}
+    bot.state["last_alert_candle"] = {"OLD/USDT": int((now - 49 * 3600) * 1000)}
+    bot.cycle()
+    assert list(bot.state["last_alert_time"]) == ["NEW/USDT"] and bot.state["last_alert_candle"] == {}
+    assert abs(bot.state["last_cycle_time"] - (now - 120)) < 5
