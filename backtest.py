@@ -27,6 +27,7 @@ SLIP = 0.0005
 HOLDS = [1, 2, 4, 8, 12, 24, 48]
 LIVE_HOLD = {"A": 24, "B": 4}
 WHATIF_THR = (68, 55)
+FEE_MULTS = [0, 2, 3, 5]
 VISION = "https://data.binance.vision/data"
 FEE_SPOT, FEE_FUT = 0.10, 0.05
 M5 = TF_MS["5m"]
@@ -191,7 +192,7 @@ def bn_metrics(base, start_ms, end_ms):
             return []
         with zipfile.ZipFile(io.BytesIO(raw)) as z:
             df = pd.read_csv(io.BytesIO(z.read(z.namelist()[0])))
-        tt = pd.to_datetime(df["create_time"], utc=True).astype("int64") // 1_000_000
+        tt = (pd.to_datetime(df["create_time"], utc=True) - pd.Timestamp(0, tz="UTC")) // pd.Timedelta(milliseconds=1)
         return list(zip(tt.tolist(), df["sum_open_interest"].astype(float).tolist()))
     with ThreadPoolExecutor(8) as p:
         rows = sorted(x for r in p.map(one, days) for x in r)
@@ -221,7 +222,7 @@ def eval_coin(job):
     ts5, ts1 = rows5[:, 0], rows1[:, 0]
     close1 = ts1 + H1
     out = {k: [] for k in ("i", "t", "d_off", "s_off", "d_on", "s_on", "adj", "atr", "rsi5", "rsi1h", "vol",
-                           "last5", "last1h", "f8", "f_time", "oic", "oi_time", "regime")}
+                           "last5", "last1h", "f8", "f_time", "oic", "oi_time", "regime", "peg")}
     cache1 = {}
     rows5_l, rows1_l = rows5.tolist(), rows1.tolist()
     for i in range(len(rows5_l) - 1):
@@ -232,12 +233,12 @@ def eval_coin(job):
         if j < 0:
             continue
         if j not in cache1:
-            closed1, why = validate_candles(rows1_l[max(0, j - WIN1 + 1): j + 1], "1h", t)
+            closed1, why = validate_candles(rows1_l[max(0, j - WIN1 + 1): j + 2], "1h", t)  # + forming candle
             cache1[j] = add_indicators(to_df(closed1)) if closed1 else None
         df1 = cache1[j]
         if df1 is None:
             continue
-        closed5, why = validate_candles(rows5_l[max(0, i - WIN5 + 1): i + 1], "5m", t)
+        closed5, why = validate_candles(rows5_l[max(0, i - WIN5 + 1): i + 2], "5m", t)  # + forming candle
         if not closed5:
             continue
         df5 = add_indicators(to_df(closed5))
@@ -256,7 +257,8 @@ def eval_coin(job):
                      ("d_on", DIR_CODE[on["dir"]]), ("s_on", on["score"]), ("adj", on["deriv_adj"]),
                      ("atr", off["atr"]), ("rsi5", off["rsi5"]), ("rsi1h", off["rsi1h"]), ("vol", off["vol"]),
                      ("last5", int(closed5[-1][0])), ("last1h", int(df1.iloc[-1]["ts"])), ("f8", f8),
-                     ("f_time", ft), ("oic", oic), ("oi_time", ot), ("regime", reg)):
+                     ("f_time", ft), ("oic", oic), ("oi_time", ot), ("regime", reg),
+                     ("peg", wr.is_pegged(price, df1))):
             out[k].append(v)
     return sym, out
 
@@ -269,7 +271,7 @@ def btc_regime_series(rows1, start_ms, end_ms):
         t = int(rows1[j, 0] + H1)
         if t < start_ms - H1 or t > end_ms:
             continue
-        closed, _ = validate_candles(rl[max(0, j - WIN1 + 1): j + 1], "1h", t)
+        closed, _ = validate_candles(rl[max(0, j - WIN1 + 1): j + 2], "1h", t)
         if closed:
             ts.append(t)
             vals.append(btc_regime(add_indicators(to_df(closed))))
@@ -360,6 +362,8 @@ def simulate(variant, evals, candles, meta):
                 continue
             if d == "SHORT" and not has_perp:
                 continue
+            if ev["peg"][n]:
+                continue
             reg = ev["regime"][n]
             if variant.get("regime_filter") and sym != "BTC/USDT" and (
                     (d == "LONG" and reg == "down") or (d == "SHORT" and reg == "up")):
@@ -369,6 +373,8 @@ def simulate(variant, evals, candles, meta):
             entry = o * (1 + SLIP) if d == "LONG" else o * (1 - SLIP)
             atr = ev["atr"][n]
             sl, tp1, tp2 = make_levels(d, entry, atr)
+            if wr.tp1_too_small(d, entry, tp1, FEE_SPOT, FEE_FUT, variant.get("fee_mult", wr.MIN_TP1_FEE_MULT)):
+                continue  # live: near-miss "target too small vs fees", no cooldown
             tr = {"symbol": sym, "dir": d, "grade": g, "entry": entry, "sl": sl, "tp1": tp1, "tp2": tp2,
                   "entry_time": rows5[k][0] / 1000, "tp1_hit": False, "checked_until": 0}
             h = hold[g]
@@ -620,6 +626,7 @@ def run(args):
     base = {"name": "live"}
     variants = [base] + [{"name": f"hold_{h}h", "hold": {"A": h, "B": h}} for h in HOLDS] + \
                [{"name": f"style_{s}", "style": s} for s in "bcd"] + \
+               [{"name": f"fee_floor_{m}x", "fee_mult": m} for m in FEE_MULTS if m != wr.MIN_TP1_FEE_MULT] + \
                [{"name": "live_deriv_covered", "coins": covered},
                 {"name": "deriv_score_on", "use_deriv": True, "coins": covered},
                 {"name": "btc_regime_filter", "regime_filter": True},
@@ -645,11 +652,16 @@ def run(args):
     pick["sides"] = {s for s in ("LONG", "SHORT") if side_rows[s]["train"]["trades"] >= 30 and side_rows[s]["train"]["exp_r"] > 0}
     pick["hold"] = {g: (best([(h, hold_rows[g][h]) for h in HOLDS]) or (LIVE_HOLD[g], None))[0] for g in "AB"}
     pick["style"] = (best([("a", R["live"])] + [(s, R[f"style_{s}"]) for s in "bcd"]) or ("a", None))[0]
+    fee_r = lambda m: R["live"] if m == wr.MIN_TP1_FEE_MULT else R[f"fee_floor_{m}x"]
+    pick["fee_mult"] = (best([(m, fee_r(m)) for m in FEE_MULTS]) or (wr.MIN_TP1_FEE_MULT, None))[0]
     pick["regime_filter"] = (R["btc_regime_filter"]["train"]["exp_r"] or -9) > (R["live"]["train"]["exp_r"] or -9)
     pick["deriv_score"] = (R["deriv_score_on"]["train"]["exp_r"] or -9) > (R["live_deriv_covered"]["train"]["exp_r"] or -9)
     pick["drop"] = sorted(c for c in coins if coin_rows[c]["train"]["trades"] >= 10 and coin_rows[c]["train"]["total_net"] < 0)
+    pick["drop_skipped"] = len(coins) - len(pick["drop"]) < 10
+    if pick["drop_skipped"]:  # dropping every losing coin would leave almost nothing to trade
+        pick["drop"] = []
     tradeable = bool(pick["grades"] and pick["sides"])
-    rec = {"name": "recommended", "hold": pick["hold"], "style": pick["style"],
+    rec = {"name": "recommended", "hold": pick["hold"], "style": pick["style"], "fee_mult": pick["fee_mult"],
            "regime_filter": pick["regime_filter"], "use_deriv": pick["deriv_score"],
            "grades": pick["grades"] or {max("AB", key=lambda g: grade_rows[g]["train"]["exp_r"] or -9)},
            "sides": pick["sides"] or {max(("LONG", "SHORT"), key=lambda s: side_rows[s]["train"]["exp_r"] or -9)},
@@ -756,11 +768,19 @@ def report(res, R, grade_rows, side_rows, hold_rows, coin_rows, meta, coins, pic
     bg = max("AB", key=lambda g: ga[g]["exp_r"] if ga[g]["exp_r"] is not None else -9)
     sa = {s: side_rows[s]["all"] for s in ("LONG", "SHORT")}
     bs = max(sa, key=lambda s: sa[s]["exp_r"] if sa[s]["exp_r"] is not None else -9)
-    L.append(f"- Better grade: {bg}-GRADE ({ga[bg]['exp_r']:+.3f} R per trade vs {ga['B' if bg == 'A' else 'A']['exp_r']}); "
-             f"better side: {bs} ({sa[bs]['exp_r']:+.3f} R vs {sa['SHORT' if bs == 'LONG' else 'LONG']['exp_r']}) — "
-             f"R = result as a multiple of the stop-loss distance.")
-    L.append(f"- Best hold time picked on the first 2 months: A {pick['hold']['A']} h, B {pick['hold']['B']} h; best exit "
-             f"style: {STYLE_NAMES[pick['style']]}.")
+    og, os_ = ("B" if bg == "A" else "A"), ("SHORT" if bs == "LONG" else "LONG")
+    same = lambda x, y: x is None or y is None or abs(x - y) < 0.02
+    gtxt = (f"A-GRADE and B-GRADE are about equally bad ({ga['A']['exp_r']:+.3f} vs {ga['B']['exp_r']:+.3f} R per trade)"
+            if same(ga["A"]["exp_r"], ga["B"]["exp_r"]) else
+            f"Better grade: {bg}-GRADE ({ga[bg]['exp_r']:+.3f} R per trade vs {ga[og]['exp_r']:+.3f})")
+    stxt = (f"LONG and SHORT are about equally bad ({sa['LONG']['exp_r']:+.3f} vs {sa['SHORT']['exp_r']:+.3f})"
+            if same(sa["LONG"]["exp_r"], sa["SHORT"]["exp_r"]) else
+            f"less bad side: {bs} ({sa[bs]['exp_r']:+.3f} R vs {sa[os_]['exp_r']:+.3f})")
+    L.append(f"- {gtxt}; {stxt}. R = the result as a multiple of the stop-loss distance; -0.3 R means you lose "
+             f"about a third of your risk on every trade.")
+    L.append(f"- Least-bad settings found on the first 2 months (all still lost money): hold A {pick['hold']['A']} h, "
+             f"B {pick['hold']['B']} h; exit style {STYLE_NAMES[pick['style']]}; fee floor {pick['fee_mult']}×. "
+             f"Together on the unseen month: {rt['trades']} trades, {rt['total_net']:+.1f}% total.")
     L.append(f"- Recommendation: {'test the recommended settings with tiny size only' if (pu and ru and tradeable and rt['total_net'] > 0) else 'keep the bot as an alert/learning tool only and do not risk real money on it'}"
              f" (recommended settings: {tt(rec)}).")
     out = "# War Room v10 — 3-month backtest report\n\n## Summary (plain English)\n\n" + "\n".join(L) + "\n"
@@ -785,6 +805,10 @@ def report(res, R, grade_rows, side_rows, hold_rows, coin_rows, meta, coins, pic
         out += table(f"Max hold time — {g}-GRADE trades", [(f"{h} h", hold_rows[g][h]) for h in HOLDS])
     out += table("Exit styles (live hold times A 24 h / B 4 h)",
                  [(STYLE_NAMES["a"], R["live"])] + [(STYLE_NAMES[s], R[f"style_{s}"]) for s in "bcd"])
+    fee_rows = [(f"TP1 ≥ {m}× round-trip fee" + (" (live default)" if m == wr.MIN_TP1_FEE_MULT else "")
+                 + (" (off)" if m == 0 else ""), R["live"] if m == wr.MIN_TP1_FEE_MULT else R[f"fee_floor_{m}x"])
+                for m in FEE_MULTS]
+    out += table("Fee floor MIN_TP1_FEE_MULT (skip setups whose TP1 is too small vs fees)", fee_rows)
     out += table("Derivatives variants", [("Off (live default, all coins)", R["live"]),
                                           ("BTC-regime filter (all coins)", R["btc_regime_filter"]),
                                           ("Off — coins with derivatives history only", R["live_deriv_covered"]),
@@ -825,18 +849,25 @@ def report(res, R, grade_rows, side_rows, hold_rows, coin_rows, meta, coins, pic
     for g in "AB":
         h = pick["hold"][g]
         out += f"- Max hold {g}-GRADE: {h} h — {tt(hold_rows[g][h])}{overfit_warn(hold_rows[g][h])}\n"
+    fm = pick["fee_mult"]
+    out += f"- Fee floor MIN_TP1_FEE_MULT: {fm} — {tt(R['live'] if fm == wr.MIN_TP1_FEE_MULT else R[f'fee_floor_{fm}x'])}\n"
     st = pick["style"]
     out += f"- Exit style: {STYLE_NAMES[st]} — {tt(R['live'] if st == 'a' else R[f'style_{st}'])}\n"
     out += f"- BTC-regime filter: {'ON' if pick['regime_filter'] else 'OFF'} — on: {tt(R['btc_regime_filter'])}; off: {tt(R['live'])}\n"
     out += (f"- USE_DERIV_SCORE: {'ON' if pick['deriv_score'] else 'OFF'} — on: {tt(R['deriv_score_on'])}; off (same "
             f"coins): {tt(R['live_deriv_covered'])}\n")
-    out += (f"- Coins to drop (≥10 training trades and losing on training): {', '.join(pick['drop']) or 'none'}. "
-            "Keep the rest (most have too few trades to judge).\n")
+    out += (f"- Coins to drop (≥10 training trades and losing on training): {', '.join(pick['drop']) or 'none'}"
+            + (" — almost every coin lost money in training, so dropping them would leave too few to trade; no coin "
+               "filter applied." if pick.get("drop_skipped") else ". Keep the rest (most have too few trades to judge).")
+            + "\n")
     out += f"- **All of the above combined:** {tt(R['recommended'])}{overfit_warn(R['recommended'])}\n"
     out += f"- Variants positive on the unseen month: {', '.join(pu) or 'none'} (with ≥30 unseen trades: {', '.join(ru) or 'none'}).\n"
     out += ("\n## Known biases (read before trusting any number)\n\n"
             "- **Survivorship bias:** coins are today's top-50 by volume; coins that crashed out of the list during the "
             "3 months are missing, and coins that pumped into it are over-represented.\n"
+            "- **Live filters applied:** coin exclusions (stablecoins, tokenized stocks, gold), the stable-like/peg "
+            "filter and the fee floor (3× by default). The order-book penalty can't do anything here because there's "
+            "no order-book history.\n"
             "- **No order book:** the 15 order-book points are always 0, so fewer setups reach the live grade lines than "
             "live (see the what-if).\n- **No AI review:** live alerts the AI rejects are included here.\n"
             "- **Slippage/fills:** a flat 0.05% adverse slippage on entry; stops and targets assumed filled exactly at "

@@ -136,6 +136,10 @@ class Config:
         self.repo_dir = env_str("GITHUB_WORKSPACE", os.path.dirname(os.path.abspath(__file__)))
         self.git_branch = env_str("GIT_BRANCH", "main")
         self.checkpoint = env_str("CHECKPOINT_PUSH", "1" if env_str("GITHUB_ACTIONS") == "true" else "0") == "1"
+        self.quiet = env_str("QUIET_MODE") == "1"
+        hm = env_str("DAILY_SUMMARY_UTC", "03:30")
+        ok = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", hm)
+        self.daily_summary_utc = f"{int(ok.group(1)):02d}:{ok.group(2)}" if ok else "03:30"
         self.__dict__.update(over)
 
     def max_hold(self, grade):
@@ -469,7 +473,8 @@ def empty_state():
             "last_alert_candle": {}, "ai_rejected_candle": {}, "booted": True, "v10_live_sent": False,
             "totals": {"A": {"w": 0, "l": 0, "net_sum": 0.0}, "B": {"w": 0, "l": 0, "net_sum": 0.0}},
             "coin_list": [], "coin_list_time": 0, "oi_snap": {}, "last_cycle_time": 0, "last_heartbeat": 0,
-            "cycle_times": [], "near_miss": {}, "hour_stats": {"alerts": 0, "ai_rejected": 0}, "outbox": []}
+            "cycle_times": [], "near_miss": {}, "hour_stats": {"alerts": 0, "ai_rejected": 0}, "outbox": [],
+            "ai_log": [], "last_daily_summary": ""}
 
 
 def upgrade_state(raw, now=None):
@@ -1259,9 +1264,12 @@ def format_heartbeat(info):
     ai_s = ("❌ AI: no key" if "no key" in ai else "❌ AI: rate-limited, pausing" if "rate-limited" in ai
             else "❌ AI: failing" if ai.startswith(("error", "empty")) else "✅ AI: working")
     ok = ex == "BINANCE" and info["deriv_src"] and ai_s.startswith("✅")
-    lines = [f"💓 <b>BOT ALIVE</b> — {'working fine' if ok else 'working, but see the ❌/⚠️ below'} ({VERSION})",
+    quiet = info.get("quiet")
+    sent = f"📝 Paper trades opened (not sent): {info['alerts']}" if quiet else f"📨 Alerts sent: {info['alerts']}"
+    lines = [f"💓 <b>BOT ALIVE</b>{' (quiet mode)' if quiet else ''} — "
+             f"{'working fine' if ok else 'working, but see the ❌/⚠️ below'} ({VERSION})",
              f"🔍 Checked {info['coins']} coins {info['cycles']} times this hour",
-             f"📨 Alerts sent: {info['alerts']} (AI blocked {info['ai_rejected']}"
+             f"{sent} (AI blocked {info['ai_rejected']}"
              + (f", AI unclear {info['ai_unclear']}" if info.get("ai_unclear") else "") + ")",
              f"📂 Open trades ({len(info['open_trades'])}): {opens}",
              f"🎯 Almost alerts (need {B_MIN}): {nm}",
@@ -1283,6 +1291,63 @@ def watchdog_message(state, now, max_age=WATCHDOG_MAX_AGE_S):
                 "Open GitHub → Actions to see why.")
     return (f"⚠️ <b>BOT DOWN</b> — I haven't checked the market for {fmt_age(now - last)}. "
             "Open GitHub → Actions to see why.")
+
+
+def utc_to_ist(hhmm):
+    h, m = map(int, hhmm.split(":"))
+    t = (h * 60 + m + 330) % 1440
+    return f"{t // 60:02d}:{t % 60:02d}"
+
+
+def quiet_notice(hhmm):
+    return (f"🤫 Quiet mode on — I'll keep testing silently and send one summary every day at "
+            f"{utc_to_ist(hhmm)} (India time).")
+
+
+def summary_slot(now, hhmm):
+    """Date key of the latest daily-summary time at or before now (UTC)."""
+    h, m = map(int, hhmm.split(":"))
+    d = datetime.fromtimestamp(now, timezone.utc)
+    slot = d.replace(hour=h, minute=m, second=0, microsecond=0)
+    if slot > d:
+        slot = datetime.fromtimestamp(slot.timestamp() - 86400, timezone.utc)
+    return slot.date().isoformat()
+
+
+def format_daily_summary(state, now, max_lines=12):
+    since = now - 86400
+    side = lambda d: "buy" if d == "LONG" else "short"
+    trades = [t for t in state["active_trades"] + state["closed_trades"] if isinstance(t, dict)]
+    opened = [t for t in trades if t.get("entry_time", 0) > since]
+    closed = [t for t in state["closed_trades"] if isinstance(t, dict) and "net" in t and t.get("exit_time", 0) > since]
+    n = lambda f: sum(1 for t in opened if f(t))
+    lines = ["📅 <b>DAILY SUMMARY</b> — last 24 hours (paper test, quiet mode)",
+             f"📝 Paper trades opened: {len(opened)} (A {n(lambda t: t.get('grade') == 'A')} · "
+             f"B {n(lambda t: t.get('grade') == 'B')} · buy {n(lambda t: t['dir'] == 'LONG')} · "
+             f"short {n(lambda t: t['dir'] == 'SHORT')})",
+             f"🏁 Paper trades closed: {len(closed)}"]
+    for t in sorted(closed, key=lambda t: t.get("exit_time", 0))[-max_lines:]:
+        res = "✅ WIN" if t["net"] > 0 else "❌ LOSS"
+        lines.append(f"  {res} {esc(coin_name(t['symbol']))} {side(t['dir'])} {t['net']:+.2f}% ({t['grade']})"
+                     + (" — not counted (not AI-checked)" if t.get("exclude_from_scoreboard") else ""))
+    if len(closed) > max_lines:
+        lines.append(f"  …and {len(closed) - max_lines} older")
+    if closed:
+        lines.append(f"💰 Total after fees (24 h): {sum(t['net'] for t in closed):+.2f}%")
+        best, worst = max(closed, key=lambda t: t["net"]), min(closed, key=lambda t: t["net"])
+        fmt = lambda t: f"{esc(coin_name(t['symbol']))} {side(t['dir'])} {t['net']:+.2f}%"
+        lines.append(f"🥇 Best: {fmt(best)} · 🥉 Worst: {fmt(worst)}")
+    else:
+        lines.append("🥇 Best: none · 🥉 Worst: none")
+    lines += [f"🏆 Scoreboard (24 h): {esc(scoreboard(recompute_totals(closed)))}",
+              f"🏆 Scoreboard (all time): {esc(scoreboard(state['totals']))}",
+              f"📂 Open trades now: {len(state['active_trades'])}"]
+    ai = [v for ts, v in state.get("ai_log", []) if ts > since]
+    lines.append(f"🤖 AI: approved {ai.count('APPROVED')} · rejected {ai.count('REJECTED')} · "
+                 f"unclear {ai.count('UNCLEAR')}"
+                 + (f" · not checked {ai.count('UNAVAILABLE')}" if "UNAVAILABLE" in ai else ""))
+    lines.append("🧪 Paper test only — don't trade these with real money.")
+    return "\n".join(lines)
 
 
 GUIDE_TEXT = "\n".join([
@@ -1404,6 +1469,8 @@ class Bot:
     def prune(self, now):
         for k, scale in (("last_alert_time", 1), ("last_alert_candle", 1000), ("ai_rejected_candle", 1000)):
             self.state[k] = {s: v for s, v in self.state[k].items() if now - v / scale <= STATE_KEEP_S}
+        self.state["ai_log"] = [x for x in self.state["ai_log"] if isinstance(x, list) and len(x) == 2
+                                and isinstance(x[0], (int, float)) and now - x[0] <= 2 * 86400]
 
     def refresh_coins(self):
         coins, src = None, self.spot.src
@@ -1488,14 +1555,16 @@ class Bot:
                 continue
             for ev in events:
                 if ev["type"] == "TP1":
-                    self.notify(format_tp1(t, ev))
+                    if not self.cfg.quiet:
+                        self.notify(format_tp1(t, ev))
                 elif not t.get("exclude_from_scoreboard"):
                     tot = self.state["totals"].setdefault(t["grade"], {"w": 0, "l": 0, "net_sum": 0.0})
                     tot["w" if ev["win"] else "l"] += 1
                     tot["net_sum"] = round(tot["net_sum"] + ev["net"], 4)
                 if ev["type"] == "CLOSE":
                     self.state["closed_trades"] = (self.state["closed_trades"] + [t])[-CLOSED_CAP:]
-                    self.notify(format_close(t, ev, self.state["totals"]))
+                    if not self.cfg.quiet:
+                        self.notify(format_close(t, ev, self.state["totals"]))
             if t.get("status") == "CLOSED":
                 self.state["active_trades"] = [x for x in self.state["active_trades"] if x is not t]
             if events:
@@ -1572,6 +1641,7 @@ class Bot:
         if verdict == "DEFER":
             log(f"{sym}: AI review deferred to next cycle (AI throttle); nothing recorded")
             return False
+        self.state["ai_log"].append([int(now), verdict])
         if verdict in ("REJECTED", "UNCLEAR"):
             log(f"{sym}: alert dropped by AI review ({verdict})")
             self.state["ai_rejected_candle"][sym] = res["candle_ts"]
@@ -1580,8 +1650,9 @@ class Bot:
             self.save()
             return False
         text = format_alert(res, src.name, verdict, note, hold, res.get("deriv_src"))
-        if not self.tg.send(text):
+        if not self.cfg.quiet and not self.tg.send(text):
             log(f"{sym}: alert not delivered; trade NOT recorded, will retry next cycle")
+            self.state["ai_log"].pop()
             return False
         trade = {"id": f"{sym}-{res['candle_ts']}", "symbol": sym, "dir": res["dir"], "grade": res["grade"],
                  "score": res["score"], "base_score": res["base_score"], "deriv_adj": res["deriv_adj"],
@@ -1595,7 +1666,8 @@ class Bot:
         self.state["last_alert_candle"][sym] = res["candle_ts"]
         self.state["hour_stats"]["alerts"] += 1
         self.save()
-        log(f"{sym}: {res['grade']}-GRADE {res['dir']} {res['score']}/100 alert delivered and trade recorded")
+        log(f"{sym}: {res['grade']}-GRADE {res['dir']} {res['score']}/100 "
+            + ("paper trade recorded silently (quiet mode)" if self.cfg.quiet else "alert delivered and trade recorded"))
         return True
 
     # -- derivatives bookkeeping
@@ -1623,7 +1695,7 @@ class Bot:
                 "ai_status": self.ai.status(), "alerts": self.state["hour_stats"]["alerts"],
                 "ai_rejected": self.state["hour_stats"]["ai_rejected"],
                 "ai_unclear": self.state["hour_stats"].get("ai_unclear", 0), "unavailable": self.unavailable,
-                "skipped": sorted(set(self.skipped) | self.pegged)}
+                "skipped": sorted(set(self.skipped) | self.pegged), "quiet": self.cfg.quiet}
 
     def maybe_heartbeat(self, now):
         if now - self.state.get("last_heartbeat", 0) < 3600:
@@ -1651,6 +1723,29 @@ class Bot:
     def maybe_guide(self):
         if not self.state.get("guide_sent") and self.tg.send(GUIDE_TEXT):
             self.state["guide_sent"] = True
+            self.save()
+
+    def maybe_quiet_notice(self):
+        if not self.cfg.quiet:
+            self.state.pop("quiet_notice_sent", None)
+        elif not self.state.get("quiet_notice_sent") and self.tg.send(quiet_notice(self.cfg.daily_summary_utc)):
+            self.state["quiet_notice_sent"] = True
+            self.save()
+
+    def maybe_daily_summary(self, now):
+        if not self.cfg.quiet:
+            self.state["last_daily_summary"] = ""  # re-enabling quiet waits for the next summary time
+            return
+        key = summary_slot(now, self.cfg.daily_summary_utc)
+        last = self.state.get("last_daily_summary")
+        if not last:  # first quiet run: the first summary comes at the next summary time
+            self.state["last_daily_summary"] = key
+            self.save()
+            return
+        if last >= key:
+            return
+        if self.tg.send(format_daily_summary(self.state, now)):  # not sent → retried next cycle (no outbox)
+            self.state["last_daily_summary"] = key
             self.save()
 
     def healthcheck(self):
@@ -1696,6 +1791,8 @@ class Bot:
             self.refresh_coins()
         self._safe("v10 live message", self.maybe_live_message)
         self._safe("guide message", self.maybe_guide)
+        self._safe("quiet notice", self.maybe_quiet_notice)
+        self._safe("daily summary", self.maybe_daily_summary, now)
         scan = list(dict.fromkeys(self.coins + [t["symbol"] for t in self.state["active_trades"]]))
         avail = [s for s in scan if src.has(s)]
         self.unavailable = [s for s in scan if not src.has(s)]
@@ -1842,6 +1939,20 @@ def run_diagnose(cfg):
     return 0
 
 
+def sample_summary_state():
+    now = int(time.time())
+    win = {"symbol": "ETH/USDT", "dir": "LONG", "grade": "A", "entry_time": now - 20000, "exit_time": now - 15000,
+           "net": 1.85}
+    loss = {"symbol": "PEPE/USDT", "dir": "SHORT", "grade": "B", "entry_time": now - 9000, "exit_time": now - 7000,
+            "net": -0.92}
+    st = empty_state()
+    st.update(closed_trades=[win, loss], totals={"A": {"w": 3, "l": 1, "net_sum": 2.1}, "B": {"w": 1, "l": 2, "net_sum": -1.4}},
+              active_trades=[{"symbol": "SOL/USDT", "dir": "LONG", "grade": "B", "entry_time": now - 3000}],
+              ai_log=[[now - 20000, "APPROVED"], [now - 9000, "APPROVED"], [now - 3000, "APPROVED"],
+                      [now - 5000, "REJECTED"], [now - 4000, "UNCLEAR"]])
+    return st
+
+
 def sample_messages(cfg, ai_review=False):
     """Example of every message type (used by --test-messages and the tests)."""
     a = {"symbol": "ETH/USDT", "dir": "LONG", "grade": "A", "score": 85, "price": 3450.2, "sl": 3401.0,
@@ -1872,6 +1983,8 @@ def sample_messages(cfg, ai_review=False):
             "close": format_close(t, {"reason": "TP2 HIT", "exit": 3550.0, "gross": 2.8, "net": 2.6, "win": True},
                                   totals),
             "heartbeat": format_heartbeat(info),
+            "quiet_notice": quiet_notice(cfg.daily_summary_utc),
+            "daily_summary": format_daily_summary(sample_summary_state(), time.time()),
             "bot_down": watchdog_message({"last_cycle_time": int(time.time()) - 2 * 3600 - 900}, time.time())}
 
 

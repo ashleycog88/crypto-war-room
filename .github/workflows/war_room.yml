@@ -53,6 +53,8 @@ jobs:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_FALLBACK_MODELS: ${{ secrets.LLM_FALLBACK_MODELS }}
           HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+          QUIET_MODE: ${{ vars.QUIET_MODE || '1' }}
+          DAILY_SUMMARY_UTC: ${{ vars.DAILY_SUMMARY_UTC || '03:30' }}
           RUN_MINUTES: '58'
           SCAN_INTERVAL: '60'
         run: python war_room_bot.py

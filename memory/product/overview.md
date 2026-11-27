@@ -34,6 +34,8 @@ A free, always-on, fail-safe Python bot on GitHub Actions that scans the top 50 
 | F-23 | Edge watchers: news headlines rated by free Gemini, Binance big-order (whale trade) flow, top-winning Hyperliquid wallets' net positioning — shown on alerts, logged for forward-testing, score only once proven | Trader | 3 |
 | F-24 | Apply the rule changes, coin list and hold times the user picks | Trader | 4 |
 | F-25 | Kid-level GitHub settings guide + how to save files to GitHub (paid button and free copy-paste path) | Trader | 1 and 4 |
+| F-26 | Quiet mode: paper-track every AI-approved setup silently; one plain daily summary at 09:00 IST instead of per-trade messages; BOT ALIVE / BOT DOWN unchanged | Trader | 2b |
+| F-27 | Strategy research lab: test several pre-registered strategy families on 1h/4h/daily candles over ~2 years, honest walk-forward, random-entry baseline, futures-fee and spot-buy-fee models; plain report | Trader | 3 |
 
 ## Phases
 - Phase 1 → working, hardened live bot on Binance data, top 50 coins, temporary hold times A 24h / B 4h (configurable), verified offline + real Telegram test messages → F-1..F-19, F-25
@@ -43,8 +45,14 @@ A free, always-on, fail-safe Python bot on GitHub Actions that scans the top 50 
   - [phase2/requirement.md](phase2/requirement.md)
   - [phase2/journeys.md](phase2/journeys.md)
   - Phase 1 status: DONE, tested (82 builder tests + independent tester 9/9), saved to GitHub main 2026-11-27 20:25 UTC; diagnostics run succeeded; first v10 run started 20:28 UTC.
-- Phase 3 → edge watchers (news, whale trades, smart-money wallets), forward-tested → F-23
-- Phase 4 → apply the user's chosen rules / coins / hold times; re-verify; final guide → F-24, F-25
+  - Phase 1b + code-review fixes: DONE, retest 10/10, merged to GitHub main (PR #1, 19e7464) 2026-11-27 21:27 UTC.
+  - Phase 2 status: DONE. RESULT = NO EDGE: all 19 variants lost after fees on training and unseen month (live rules −0.31 R/trade, ~44% win, ~350 signals/day; before costs ≈ coin flip). User told honestly; chose: research bigger-timeframe strategies, quiet mode meanwhile.
+- Phase 2b → Quiet mode for the live bot: paper-tracking continues, per-trade messages replaced by one daily summary (09:00 IST) → F-26
+  - requirements: phase2/requirement.md section "Phase 2b"; journeys JRN-75..80 in phase2/journeys.md
+- Phase 3 → Strategy research on bigger timeframes (1h/4h/daily), several pre-registered strategy families, 2 years of data, futures + spot-buy fee models, walk-forward + random-entry baseline; keep only what passes on unseen data → F-27
+  - [phase3/requirement.md](phase3/requirement.md)
+  - [phase3/journeys.md](phase3/journeys.md)
+- Phase 4 → If a strategy passes: implement it in the live bot as paper alerts first (then edge watchers: news, whale trades, smart-money wallets — old F-23), apply user's choices → F-23, F-24, F-25
 
 ## UI/UX Rules
 - The only "UI" is Telegram messages (and reports relayed in chat). HTML-formatted, every dynamic value escaped, emojis kept.
