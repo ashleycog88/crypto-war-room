@@ -14,3 +14,8 @@ test_result*.md
 state.json.corrupt-*
 state_*.json
 tmp_state*.json
+.env.*
+credentials.json
+*.pem
+*.key
+.credentials
