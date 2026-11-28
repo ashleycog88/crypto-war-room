@@ -64,6 +64,9 @@ A free, always-on, fail-safe Python bot on GitHub Actions that scans the top 50 
 - User decisions: no Solana/Ethereum memecoin wallets; daily summary 12:01 PM India time (Asia/Kolkata).
 - Oracle signup failed (form wouldn't let the user continue) → user chose Plan B now: Phase 3c privacy lock on free GitHub (encrypted state + data, hidden BOT_SETTINGS, quiet logs); Oracle/private server decided later.
   - [phase3c/requirement.md](phase3c/requirement.md), [phase3c/journeys.md](phase3c/journeys.md)
+- Status 2026-11-28: Phase 2c (self-chaining, 12:01 IST summary) merged PR #3, verified on GitHub (github-actions[bot] dispatches). Phase 3b+3c merged PR #4: state.json.enc live, `data` branch recording (Upbit 403 expected). Phase 3 research: NO strategy passed (near misses: S1 breakout longs on majors failed "both halves"; S5 top-3 momentum majors 94.85th pct vs 95 needed). User chose BOTH paper-watching the near misses and Step C research.
+- Phase 4 → Part A paper-watch S1/S5 (daily summary only) + Part B Step C research (C1 Hyperliquid wallet copying, walk-forward; C2 listing/delisting events)
+  - [phase4/requirement.md](phase4/requirement.md), [phase4/journeys.md](phase4/journeys.md)
 
 ## UI/UX Rules
 - The only "UI" is Telegram messages (and reports relayed in chat). HTML-formatted, every dynamic value escaped, emojis kept.

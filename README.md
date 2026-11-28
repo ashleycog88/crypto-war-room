@@ -14,6 +14,8 @@ Every hour GitHub starts the bot. It runs for about 58 minutes and scans the top
 | `state.json` | the bot's memory (open trades, records, cooldowns). The bot updates it. Don't edit it by hand. With `DATA_KEY` it becomes the encrypted `state.json.enc` |
 | `datalock.py` + `datalock.salt` | encryption helper (AES-256-GCM) and its public salt; also a `decrypt` command for research |
 | `recorder.py` + `.github/workflows/recorder.yml` | the edge-data recorder (hourly at :23), see below |
+| `research.py` | Phase 3 strategy research (`python research.py`; results only in the gitignored `private_reports/`) |
+| `paper_watch.py` | quietly paper-watches the 2 Phase 3 near misses using research.py's own rules (daily summary only) |
 | `tests/` | offline tests (`pip install pytest==9.2.0 && pytest tests -q`) |
 
 ## 1. GitHub secrets (Settings → Secrets and variables → Actions → New repository secret)
@@ -50,6 +52,8 @@ The BOT DOWN watchdog runs on GitHub too, so if GitHub stops starting workflows 
 6. Back on Healthchecks.io: click **Integrations** (top menu) → **Telegram** → **Add Integration**. Follow the steps: it opens the Healthchecks bot in Telegram, you press **Start**, and it connects.
 7. Done. If the bot stops scanning for more than 1½ hours, Telegram tells you "check is DOWN". When it starts again, it tells you "UP".
 
+BOT ALIVE and the daily summary show a line about it: "🩺 Outside watchdog (Healthchecks): ✅ connected" (last ping worked), "❌ ping failing (HTTP …)" (URL set but pings fail; check the URL) or "➖ not set up" (no `HEALTHCHECK_URL` secret). The URL itself is never shown.
+
 ## Quiet mode (on by default)
 The backtest showed these rules lose money, so by default the bot is **quiet**. It keeps scanning, asking the AI and paper-tracking trades, but it does **not** send a message for every trade. Instead you get:
 - one **📅 DAILY SUMMARY** every day at 12:01 PM India time. If the bot wasn't running at that time, the summary comes at the start of the next run.
@@ -66,6 +70,14 @@ The backtest showed these rules lose money, so by default the bot is **quiet**. 
 **To turn it back ON:** same place, click the pencil next to `QUIET_MODE`, change the value to `1`, then **Update variable** (or delete the variable, since on is the default).
 The change works from the next hourly run. No code edits needed.
 To move the summary time, add a variable `DAILY_SUMMARY_TIME` in 24-hour format, e.g. `07:00` = 7:00 AM or `18:30` = 6:30 PM. The default is `12:01` (12:01 PM). To use another time zone, add `DAILY_SUMMARY_TZ`, e.g. `America/New_York` (US Eastern) or `Europe/London`. The default is `Asia/Kolkata` (India time). Summer/winter clock changes are handled automatically. After a change, the bot sends one "🕐 Daily summary time updated: every day at …" message, and the next summary comes at the new time.
+
+## Paper-watch of the 2 near misses (on by default, no alerts)
+Phase 3 found two strategies that came close to passing. The bot follows them **on paper** and only reports in the daily summary, in a "🔭 Watching (paper, not tradeable yet)" block. It shows what each one holds now, its trades in the last 24 hours, its result after fees since the watch started, and the number of days watched.
+- **4h breakout (buy only, majors):** buy when a 4-hour candle closes above the highest high of the previous 20 candles, and only while BTC is above its 200-candle average. The stop is 2 ATR below entry. Exit at the next open after a close below the lowest low of the previous 10 candles. Futures fees and funding are counted.
+- **Top-3 momentum (majors, spot):** after every daily close, if BTC is above its 50-day average, hold the 3 majors with the biggest 30-day gain in equal parts; otherwise hold cash. Spot fees are counted.
+- Both use research.py's own code, closed candles only, and fills at the next candle's open. The first summary says "🔭 Started watching 2 near-miss strategies today."
+- To switch it off, put `"PAPER_WATCH": false` in the `BOT_SETTINGS` secret. Settings can be changed the same way, e.g. `"WATCH_S1": {"n": 55}` or `"WATCH_S5": {"k": 5}`.
+- **These are not tradeable. Both failed the Phase 3 honesty rules.**
 
 ## 3. Telegram messages
 | message | meaning |

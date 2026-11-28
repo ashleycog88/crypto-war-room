@@ -4,7 +4,7 @@
 Modes: (default) scan loop | --watchdog | --diagnose | --commit-state | --test-messages
 Pure functions (indicators, scoring, trade resolution, fees) are importable for the Phase 2 backtest.
 """
-import os, re, sys, json, time, html, math, shutil, signal, hashlib, tempfile, argparse, threading, subprocess, traceback
+import os, re, sys, copy, json, time, html, math, shutil, signal, hashlib, tempfile, argparse, threading, subprocess, traceback
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
@@ -44,6 +44,7 @@ COOLDOWN_S = 3600
 A_MIN, B_MIN = 80, 65
 SL_ATR, TP1_ATR, TP2_ATR = 1.8, 2.0, 3.6
 CHECKPOINT_S = 900
+PW_RETRY_S = 600  # paper-watch retry after a failed update
 LEGACY_SCHED = "09:00 Asia/Kolkata"  # pre-time-zone schedule (03:30 UTC = 09:00 IST, same date key)
 TZ_LABELS = {"America/New_York": "US Eastern time", "America/Chicago": "US Central time",
              "America/Denver": "US Mountain time", "America/Los_Angeles": "US Pacific time",
@@ -173,6 +174,7 @@ SETTINGS = {
     "TOP_N_COINS": ("c", "top_n", _num(5, 300, True)), "EXCLUDE_COINS": ("c", "exclude_coins", _coins),
     "USE_DERIV_SCORE": ("c", "use_deriv", _bool), "FEE_PCT_SPOT": ("c", "fee_spot", _num(0, 2)),
     "FEE_PCT_FUTURES": ("c", "fee_fut", _num(0, 2)), "STRATEGY": ("c", "strategy", _obj),
+    "PAPER_WATCH": ("c", "paper_watch", _bool), "WATCH_S1": ("c", "watch_s1", _obj), "WATCH_S5": ("c", "watch_s5", _obj),
 }
 
 
@@ -236,6 +238,8 @@ class Config:
         self.use_deriv = env_str("USE_DERIV_SCORE") == "1"
         self.min_tp1_fee_mult = env_num("MIN_TP1_FEE_MULT", MIN_TP1_FEE_MULT)
         self.healthcheck_url = env_str("HEALTHCHECK_URL")
+        self.paper_watch = env_str("PAPER_WATCH", "1") != "0"
+        self.watch_s1, self.watch_s5 = {}, {}
         self.msg_prefix = env_str("MSG_PREFIX")
         self.tg_max_sends = env_num("TG_MAX_SENDS", 0, int)
         self.repo_dir = env_str("GITHUB_WORKSPACE", os.path.dirname(os.path.abspath(__file__)))
@@ -1453,6 +1457,18 @@ def format_heartbeat(info):
     return "\n".join(lines)
 
 
+def healthcheck_line(configured, status):
+    """Outside watchdog (Healthchecks.io) status for BOT ALIVE and the daily summary; never shows the URL."""
+    head = "🩺 Outside watchdog (Healthchecks): "
+    if not configured:
+        return head + "➖ not set up"
+    if not status:
+        return head + "⏳ first ping pending"
+    if status.get("code") == 200:
+        return head + "✅ connected"
+    return head + f"❌ ping failing ({'HTTP ' + str(status['code']) if status.get('code') else 'no connection'})"
+
+
 def watchdog_message(state, now, max_age=WATCHDOG_MAX_AGE_S):
     last = int((state or {}).get("last_cycle_time") or 0)
     if last and now - last <= max_age:
@@ -1698,6 +1714,7 @@ class Bot:
         self.run_t0 = time.time()
         self.chain = None
         self.chain_done = False
+        self.pw_thread, self.pw_box, self.pw_retry = None, {}, 0.0
 
     def save(self):
         save_state_secure(self.cfg.state_file, self.state, self.key, self.locked)
@@ -1987,7 +2004,7 @@ class Bot:
                 "ai_rejected": self.state["hour_stats"]["ai_rejected"],
                 "ai_unclear": self.state["hour_stats"].get("ai_unclear", 0), "unavailable": self.unavailable,
                 "skipped": sorted(set(self.skipped) | self.pegged), "quiet": self.cfg.quiet,
-                "extra": self.privacy_lines() + recorder_warnings(self.recorder_status(now), now),
+                "extra": [self.healthcheck_line()] + self.privacy_lines() + recorder_warnings(self.recorder_status(now), now),
                 "chain": self.chain or (self.state.get("last_chain") if self.cfg.gh_token else None)}
 
     def maybe_heartbeat(self, now):
@@ -2049,8 +2066,11 @@ class Bot:
         if last >= key:
             return
         extra = [recorder_line(self.recorder_status(now), now)] if self.cfg.recorder_status_url else []
+        extra += self.paper_watch_lines(now) + [self.healthcheck_line()]
         if self.tg.send(format_daily_summary(self.state, now, extra=extra + self.privacy_lines())):  # not sent → retried next cycle
             self.state["last_daily_summary"] = key
+            if self.state.get("paper_watch") and self.cfg.paper_watch:
+                self.state["paper_watch"]["announced"] = True
             self.save()
 
     def maybe_chain(self, now):
@@ -2067,11 +2087,56 @@ class Bot:
 
     def healthcheck(self):
         if not self.cfg.healthcheck_url:
+            self.state.pop("healthcheck", None)
             return
         try:
-            _http_get(self.cfg.healthcheck_url, 5)
+            code = getattr(_http_get(self.cfg.healthcheck_url, 5), "status_code", None)
         except Exception as e:
+            code = None
             log(f"Healthcheck ping failed: {type(e).__name__}")
+        self.state["healthcheck"] = {"code": code, "t": int(time.time())}
+
+    def healthcheck_line(self):
+        return healthcheck_line(bool(self.cfg.healthcheck_url), self.state.get("healthcheck"))
+
+    def maybe_paper_watch(self, now):
+        """Paper-watch the Phase 3 near misses in a background thread, so the scan cycle is never slowed."""
+        if not self.cfg.paper_watch:
+            return
+        if self.pw_thread and not self.pw_thread.is_alive():
+            self.pw_thread = None
+            if "state" in self.pw_box:
+                new, old = self.pw_box.pop("state"), self.state.get("paper_watch") or {}
+                new["announced"] = bool(new.get("announced") or old.get("announced"))  # summary may have run meanwhile
+                self.state["paper_watch"] = new
+                self.save()
+            else:
+                log(f"Paper-watch update skipped ({self.pw_box.pop('error', 'unknown')}); positions kept")
+                self.pw_retry = now + PW_RETRY_S
+        import paper_watch
+        if self.pw_thread or now < self.pw_retry or not paper_watch.due(self.state.get("paper_watch"), now):
+            return
+        snap, box = copy.deepcopy(self.state.get("paper_watch")), {}
+
+        def work():
+            try:
+                box["state"] = paper_watch.update(snap, now, self.cfg.watch_s1, self.cfg.watch_s5)
+            except Exception as e:
+                box["error"] = type(e).__name__
+        self.pw_box = box
+        self.pw_thread = threading.Thread(target=work, name="paper-watch", daemon=True)
+        self.pw_thread.start()
+
+    def paper_watch_lines(self, now):
+        if not self.cfg.paper_watch or not self.state.get("paper_watch"):
+            return []
+        import paper_watch
+        try:
+            lines = paper_watch.summary_lines(self.state["paper_watch"], now, coin_name)
+        except Exception as e:  # a bad watch state must never block the daily summary
+            log(f"Paper-watch summary skipped: {type(e).__name__}")
+            return []
+        return [esc(x) if not x.startswith("🔭 <b>") else x for x in lines]
 
     def maybe_checkpoint(self, now, force=False):
         if not self.cfg.checkpoint or (not force and now - self.last_push < CHECKPOINT_S):
@@ -2111,6 +2176,7 @@ class Bot:
         self._safe("quiet notice", self.maybe_quiet_notice)
         self._safe("daily summary", self.maybe_daily_summary, now)
         self._safe("lock warning", self.maybe_lock_warning)
+        self._safe("paper watch", self.maybe_paper_watch, now)
         scan = list(dict.fromkeys(self.coins + [t["symbol"] for t in self.state["active_trades"]]))
         avail = [s for s in scan if src.has(s)]
         self.unavailable = [s for s in scan if not src.has(s)]

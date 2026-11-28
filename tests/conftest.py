@@ -22,8 +22,9 @@ def clean_env(monkeypatch):
               "MAX_HOLD_B_HOURS", "TOP_N_COINS", "USE_DERIV_SCORE", "HEALTHCHECK_URL", "MSG_PREFIX", "TG_MAX_SENDS",
               "GITHUB_ACTIONS", "CHECKPOINT_PUSH", "GITHUB_WORKSPACE", "QUIET_MODE", "DAILY_SUMMARY_UTC", "DAILY_SUMMARY_TIME", "DAILY_SUMMARY_TZ", "GITHUB_TOKEN", "GITHUB_REPOSITORY", "GITHUB_REF_NAME",
               "GITHUB_API_URL", "CHAIN_AT_MINUTE", "SPOT_SOURCES", "DATA_KEY", "BOT_SETTINGS", "LOG_DETAIL",
-              "RECORDER_STATUS_URL", "REC_DIR", "REC_PUSH", "REC_LLM_MODEL", "REC_LLM_FALLBACK", "REC_AI_DAILY_CAP"]:
+              "RECORDER_STATUS_URL", "REC_DIR", "REC_PUSH", "REC_LLM_MODEL", "REC_LLM_FALLBACK", "REC_AI_DAILY_CAP", "PAPER_WATCH"]:
         monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("PAPER_WATCH", "0")  # paper-watch tests switch it on themselves (no network in tests)
     monkeypatch.setattr(wr, "TG_GAP_S", 0.0)
     yield
 
