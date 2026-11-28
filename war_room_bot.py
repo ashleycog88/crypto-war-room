@@ -5,7 +5,8 @@ Modes: (default) scan loop | --watchdog | --diagnose | --commit-state | --test-m
 Pure functions (indicators, scoring, trade resolution, fees) are importable for the Phase 2 backtest.
 """
 import os, re, sys, json, time, html, math, shutil, signal, hashlib, tempfile, argparse, threading, subprocess, traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
 
 try:  # heavy deps are optional so --commit-state / --watchdog still work if pip install failed
@@ -38,6 +39,12 @@ COOLDOWN_S = 3600
 A_MIN, B_MIN = 80, 65
 SL_ATR, TP1_ATR, TP2_ATR = 1.8, 2.0, 3.6
 CHECKPOINT_S = 900
+LEGACY_SCHED = "09:00 Asia/Kolkata"  # pre-time-zone schedule (03:30 UTC = 09:00 IST, same date key)
+TZ_LABELS = {"America/New_York": "US Eastern time", "America/Chicago": "US Central time",
+             "America/Denver": "US Mountain time", "America/Los_Angeles": "US Pacific time",
+             "Asia/Kolkata": "India time", "UTC": "UTC"}
+CHAIN_WORKFLOW = "war_room.yml"
+CHAIN_RETRY_S = 5
 CLOSED_CAP = 1000
 WATCHDOG_MAX_AGE_S = 7200
 OB_PENALTY = int(float(os.environ.get("OB_PENALTY") or 15))  # points removed when the order book leans >=15% against the side (env OB_PENALTY, 0 = off)
@@ -137,9 +144,21 @@ class Config:
         self.git_branch = env_str("GIT_BRANCH", "main")
         self.checkpoint = env_str("CHECKPOINT_PUSH", "1" if env_str("GITHUB_ACTIONS") == "true" else "0") == "1"
         self.quiet = env_str("QUIET_MODE") == "1"
-        hm = env_str("DAILY_SUMMARY_UTC", "03:30")
+        legacy = env_str("DAILY_SUMMARY_UTC")  # legacy override (UTC) only if explicitly set
+        hm = legacy or env_str("DAILY_SUMMARY_TIME", "12:01")
         ok = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", hm)
-        self.daily_summary_utc = f"{int(ok.group(1)):02d}:{ok.group(2)}" if ok else "03:30"
+        self.summary_time = f"{int(ok.group(1)):02d}:{ok.group(2)}" if ok else "12:01"
+        self.summary_tz = "UTC" if legacy else env_str("DAILY_SUMMARY_TZ", "Asia/Kolkata")
+        try:
+            ZoneInfo(self.summary_tz)
+        except Exception:
+            log(f"Unknown DAILY_SUMMARY_TZ {self.summary_tz!r}; using Asia/Kolkata")
+            self.summary_tz = "Asia/Kolkata"
+        self.gh_token = env_str("GITHUB_TOKEN")
+        self.gh_repo = env_str("GITHUB_REPOSITORY")
+        self.gh_ref = env_str("GITHUB_REF_NAME", "main")
+        self.gh_api = env_str("GITHUB_API_URL", "https://api.github.com")
+        self.chain_at_minute = env_num("CHAIN_AT_MINUTE", 50)
         self.__dict__.update(over)
 
     def max_hold(self, grade):
@@ -147,7 +166,7 @@ class Config:
 
 
 def mask_secrets(cfg):
-    vals = [cfg.raw_token, cfg.tg_token, cfg.tg_chat, cfg.llm_key, cfg.healthcheck_url]
+    vals = [cfg.raw_token, cfg.tg_token, cfg.tg_chat, cfg.llm_key, cfg.healthcheck_url, cfg.gh_token]
     for v in vals:
         register_secret(v)
     if os.environ.get("GITHUB_ACTIONS") == "true":
@@ -568,6 +587,12 @@ def _http_get(url, timeout, params=None):
     return requests.get(url, timeout=timeout, params=params)
 
 
+def _gh_request(method, url, token, json_body=None, params=None, timeout=15):
+    hdr = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+           "X-GitHub-Api-Version": "2022-11-28"}
+    return requests.request(method, url, headers=hdr, json=json_body, params=params, timeout=timeout)
+
+
 _sleep = time.sleep
 
 
@@ -924,7 +949,9 @@ class CcxtSpot:
 
 
 def default_spot_factories():
-    return [("BINANCE", BinanceSpot)] + [(x.upper(), (lambda x=x: CcxtSpot(x))) for x in FALLBACK_EXCHANGES]
+    allowed = {s.strip().upper() for s in env_str("SPOT_SOURCES").split(",") if s.strip()}  # e.g. "BINANCE"
+    facts = [("BINANCE", BinanceSpot)] + [(x.upper(), (lambda x=x: CcxtSpot(x))) for x in FALLBACK_EXCHANGES]
+    return [f for f in facts if not allowed or f[0] in allowed]
 
 
 class SpotRouter:
@@ -1279,6 +1306,8 @@ def format_heartbeat(info):
         lines.append(f"⚠️ Not available on {esc(ex.title())}: {esc(', '.join(coin_name(p) for p in info['unavailable']))}")
     if info["skipped"]:
         lines.append(f"⚠️ Skipped (bad data): {esc(', '.join(coin_name(p) for p in info['skipped']))}")
+    if info.get("chain"):
+        lines.append(f"🔗 Next run {esc(info['chain'])}")
     return "\n".join(lines)
 
 
@@ -1293,25 +1322,37 @@ def watchdog_message(state, now, max_age=WATCHDOG_MAX_AGE_S):
             "Open GitHub → Actions to see why.")
 
 
-def utc_to_ist(hhmm):
+def tz_label(tz):
+    return TZ_LABELS.get(tz, f"{tz} time")
+
+
+def clock12(hhmm):
     h, m = map(int, hhmm.split(":"))
-    t = (h * 60 + m + 330) % 1440
-    return f"{t // 60:02d}:{t % 60:02d}"
+    return f"{h % 12 or 12}:{m:02d} {'AM' if h < 12 else 'PM'}"
 
 
-def quiet_notice(hhmm):
-    return (f"🤫 Quiet mode on — I'll keep testing silently and send one summary every day at "
-            f"{utc_to_ist(hhmm)} (India time).")
+def sched_key(cfg):
+    return f"{cfg.summary_time} {cfg.summary_tz}"
 
 
-def summary_slot(now, hhmm):
-    """Date key of the latest daily-summary time at or before now (UTC)."""
+def when_text(cfg):
+    return f"{clock12(cfg.summary_time)} ({tz_label(cfg.summary_tz)})"
+
+
+def quiet_notice(cfg):
+    return f"🤫 Quiet mode on — I'll keep testing silently and send one summary every day at {when_text(cfg)}."
+
+
+def time_update_notice(cfg):
+    return f"🕐 Daily summary time updated: every day at {when_text(cfg)}."
+
+
+def summary_slot(now, hhmm, tz="UTC"):
+    """Local date of the latest daily-summary time at or before now (one key per local date, so DST-safe)."""
     h, m = map(int, hhmm.split(":"))
-    d = datetime.fromtimestamp(now, timezone.utc)
-    slot = d.replace(hour=h, minute=m, second=0, microsecond=0)
-    if slot > d:
-        slot = datetime.fromtimestamp(slot.timestamp() - 86400, timezone.utc)
-    return slot.date().isoformat()
+    d = datetime.fromtimestamp(now, ZoneInfo(tz))
+    day = d.date() if (d.hour, d.minute) >= (h, m) else d.date() - timedelta(days=1)
+    return day.isoformat()
 
 
 def format_daily_summary(state, now, max_lines=12):
@@ -1363,6 +1404,7 @@ GUIDE_TEXT = "\n".join([
     "⏰ Time limit: if nothing is hit, close the trade after the hours shown.",
     "✅ <b>TP1 HIT</b> = do step 3 now. 🏁 Trade finished = the result after Binance fees + the scoreboard.",
     "💓 <b>BOT ALIVE</b> = my hourly “I'm working” message. ⚠️ <b>BOT DOWN</b> = I stopped — open GitHub → Actions.",
+    "🔔 Tip: set up the free Healthchecks.io check (see README) so you get a Telegram alert even if GitHub itself stops me.",
     "🧪 Important: paper-test first (write the trades down, no real money). These rules are NOT proven to make "
     "money yet — don't risk real money.",
 ])
@@ -1438,6 +1480,9 @@ class Bot:
         self.cycle_stats = []
         self.cycle_t0 = time.time()
         self.pegged = set()
+        self.run_t0 = time.time()
+        self.chain = None
+        self.chain_done = False
 
     def save(self):
         save_state(self.cfg.state_file, self.state)
@@ -1522,8 +1567,11 @@ class Bot:
 
     def fetch_market(self, src, syms, now_ms):
         workers = 8 if src.name == "BINANCE" else 1  # ccxt instances are not thread-safe
-        with ThreadPoolExecutor(workers) as p:
+        p = ThreadPoolExecutor(workers)
+        try:
             res = dict(zip(syms, p.map(lambda s: self._safe_fetch(src, s, now_ms), syms)))
+        finally:
+            p.shutdown(wait=False, cancel_futures=True)  # a stop signal must not wait for queued fetches
         self.skipped = {s: r["err"] for s, r in res.items() if r.get("err")}
         for s, e in self.skipped.items():
             log(f"{s}: skipped this scan: {e}")
@@ -1695,7 +1743,8 @@ class Bot:
                 "ai_status": self.ai.status(), "alerts": self.state["hour_stats"]["alerts"],
                 "ai_rejected": self.state["hour_stats"]["ai_rejected"],
                 "ai_unclear": self.state["hour_stats"].get("ai_unclear", 0), "unavailable": self.unavailable,
-                "skipped": sorted(set(self.skipped) | self.pegged), "quiet": self.cfg.quiet}
+                "skipped": sorted(set(self.skipped) | self.pegged), "quiet": self.cfg.quiet,
+                "chain": self.chain or (self.state.get("last_chain") if self.cfg.gh_token else None)}
 
     def maybe_heartbeat(self, now):
         if now - self.state.get("last_heartbeat", 0) < 3600:
@@ -1728,16 +1777,27 @@ class Bot:
     def maybe_quiet_notice(self):
         if not self.cfg.quiet:
             self.state.pop("quiet_notice_sent", None)
-        elif not self.state.get("quiet_notice_sent") and self.tg.send(quiet_notice(self.cfg.daily_summary_utc)):
-            self.state["quiet_notice_sent"] = True
+            self.state.pop("summary_announced", None)
+            return
+        sched = sched_key(self.cfg)
+        if not self.state.get("quiet_notice_sent"):
+            if self.tg.send(quiet_notice(self.cfg)):
+                self.state.update(quiet_notice_sent=True, summary_announced=sched)
+                self.save()
+        elif self.state.get("summary_announced", LEGACY_SCHED) != sched and self.tg.send(time_update_notice(self.cfg)):
+            self.state["summary_announced"] = sched
             self.save()
 
     def maybe_daily_summary(self, now):
         if not self.cfg.quiet:
             self.state["last_daily_summary"] = ""  # re-enabling quiet waits for the next summary time
             return
-        key = summary_slot(now, self.cfg.daily_summary_utc)
+        sched = sched_key(self.cfg)
+        key = summary_slot(now, self.cfg.summary_time, self.cfg.summary_tz)
         last = self.state.get("last_daily_summary")
+        if last and self.state.get("summary_sched", LEGACY_SCHED) != sched:
+            last = ""  # summary time/zone changed: wait for the next summary time
+        self.state["summary_sched"] = sched
         if not last:  # first quiet run: the first summary comes at the next summary time
             self.state["last_daily_summary"] = key
             self.save()
@@ -1747,6 +1807,43 @@ class Bot:
         if self.tg.send(format_daily_summary(self.state, now)):  # not sent → retried next cycle (no outbox)
             self.state["last_daily_summary"] = key
             self.save()
+
+    def maybe_chain(self, now):
+        """At ~minute CHAIN_AT_MINUTE, queue the next war_room.yml run (GitHub's cron is unreliable)."""
+        c = self.cfg
+        if self.chain_done or not (c.gh_token and c.gh_repo) or c.dry_run:
+            return
+        if time.time() - self.run_t0 < c.chain_at_minute * 60:
+            return
+        if not [t for t in self.state["cycle_times"] if now - t <= 600]:
+            self.chain = "❌ not queued (no healthy scan in the last 10 min)"
+            return
+        base = f"{c.gh_api}/repos/{c.gh_repo}/actions/workflows/{CHAIN_WORKFLOW}"
+        for st in ("queued", "pending", "waiting", "requested"):
+            try:
+                r = _gh_request("GET", f"{base}/runs", c.gh_token, params={"status": st, "per_page": 5})
+                if r.status_code == 200 and (r.json() or {}).get("total_count", 0) > 0:
+                    self.chain, self.chain_done = "queued ✅ (one was already waiting)", True
+                    log(f"Next run already {st}; not dispatching another")
+                    return
+            except Exception as e:
+                log(f"Run-queue check failed ({err_text(e)[:80]}); dispatching anyway")
+                break
+        why = "?"
+        for attempt in (1, 2):
+            try:
+                r = _gh_request("POST", f"{base}/dispatches", c.gh_token, json_body={"ref": c.gh_ref})
+                if r.status_code in (200, 201, 204):
+                    self.chain, self.chain_done = "queued ✅", True
+                    log("Next run dispatched (workflow_dispatch)")
+                    return
+                why = f"HTTP {r.status_code}"
+            except Exception as e:
+                why = type(e).__name__
+            log(f"Next-run dispatch attempt {attempt} failed: {why}")
+            if attempt == 1:
+                _sleep(CHAIN_RETRY_S)
+        self.chain, self.chain_done = f"❌ not queued (dispatch failed: {why})", True
 
     def healthcheck(self):
         if not self.cfg.healthcheck_url:
@@ -1825,6 +1922,9 @@ class Bot:
         self.state["last_cycle_time"] = int(now)
         self.state["cycle_times"] = [t for t in self.state["cycle_times"] if now - t <= 3600] + [int(now)]
         self.save()
+        self._safe("next-run chain", self.maybe_chain, now)
+        if self.chain:
+            self.state["last_chain"] = self.chain  # shown in BOT ALIVE of this and the next run
         self._safe("heartbeat", self.maybe_heartbeat, now)
         self.save()
         self.healthcheck()
@@ -1983,7 +2083,8 @@ def sample_messages(cfg, ai_review=False):
             "close": format_close(t, {"reason": "TP2 HIT", "exit": 3550.0, "gross": 2.8, "net": 2.6, "win": True},
                                   totals),
             "heartbeat": format_heartbeat(info),
-            "quiet_notice": quiet_notice(cfg.daily_summary_utc),
+            "quiet_notice": quiet_notice(cfg),
+            "time_update": time_update_notice(cfg),
             "daily_summary": format_daily_summary(sample_summary_state(), time.time()),
             "bot_down": watchdog_message({"last_cycle_time": int(time.time()) - 2 * 3600 - 900}, time.time())}
 

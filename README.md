@@ -23,7 +23,7 @@ Every hour GitHub starts the bot. It runs for about 58 minutes and scans the top
 | `LLM_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai/` |
 | `LLM_MODEL` | `gemini-3.5-flash-lite` |
 | `LLM_FALLBACK_MODELS` | optional. Models to try in order if the main one fails, separated by commas. Default `gemini-3.1-flash-lite,gemini-3.6-flash`. The AI gets at most ~30 s per alert in total |
-| `HEALTHCHECK_URL` | optional: a free https://healthchecks.io ping URL that warns you by e-mail if the bot stops |
+| `HEALTHCHECK_URL` | strongly recommended: a free https://healthchecks.io ping URL. It is the only watchdog that works even if GitHub stops starting the bot (see "Outside watchdog" below) |
 
 Never link a billing account to the Gemini key. The free tier is enough, and the bot backs off when Google says "too many requests".
 
@@ -33,9 +33,22 @@ Never link a billing account to the Gemini key. The free tier is enough, and the
 3. **Crypto War Room v10** → *Run workflow* (after that it runs every hour by itself).
 4. GitHub switches off scheduled workflows in public repos after 60 days without commits. The bot commits `state.json` every 15 minutes, so this shouldn't happen. If it ever does, open Actions and press *Enable workflow*.
 
+## Self-chaining (why the bot keeps running)
+GitHub's hourly timer (cron) is not reliable. Sometimes it skips hours. So at about minute 50 of each run, the bot asks GitHub to start the next run itself. The next run waits in the queue and starts as soon as the current one ends. It only does this if it scanned fine in the last 10 minutes (so a broken version can't keep restarting itself), and only if no run is already waiting. The hourly timer stays on as a backup. BOT ALIVE shows `🔗 Next run queued ✅` or `❌ not queued (reason)`. You don't need to set anything up: it uses GitHub's built-in token (`actions: write` permission in `war_room.yml`). Change the minute with `CHAIN_AT_MINUTE` (default 50).
+
+## Outside watchdog (Healthchecks.io, free, recommended)
+The BOT DOWN watchdog runs on GitHub too, so if GitHub stops starting workflows it can't warn you either. Healthchecks.io runs outside GitHub. The bot "pings" it after every finished scan. If the pings stop, it sends you a Telegram message.
+1. Go to https://healthchecks.io and click **Sign Up** (free). Confirm your e-mail.
+2. Your project shows a check called "My First Check". Click its name, or **Add Check**.
+3. Click **Change Schedule** (or the period setting). Set **Period = 1 hour** and **Grace Time = 30 minutes**. Save.
+4. Copy the **ping URL** (it looks like `https://hc-ping.com/1234abcd-...`).
+5. On GitHub: **Settings → Secrets and variables → Actions → Secrets tab → New repository secret**. Name `HEALTHCHECK_URL`, paste the URL, **Add secret**.
+6. Back on Healthchecks.io: click **Integrations** (top menu) → **Telegram** → **Add Integration**. Follow the steps: it opens the Healthchecks bot in Telegram, you press **Start**, and it connects.
+7. Done. If the bot stops scanning for more than 1½ hours, Telegram tells you "check is DOWN". When it starts again, it tells you "UP".
+
 ## Quiet mode (on by default)
 The backtest showed these rules lose money, so by default the bot is **quiet**. It keeps scanning, asking the AI and paper-tracking trades, but it does **not** send a message for every trade. Instead you get:
-- one **📅 DAILY SUMMARY** every day at 09:00 India time (03:30 UTC). If the bot wasn't running at that time, the summary comes at the start of the next run.
+- one **📅 DAILY SUMMARY** every day at 12:01 PM India time. If the bot wasn't running at that time, the summary comes at the start of the next run.
 - the hourly **💓 BOT ALIVE (quiet mode)** and, if something breaks, **⚠️ BOT DOWN**.
 
 **To turn quiet mode OFF (get a message for every trade again):**
@@ -48,7 +61,7 @@ The backtest showed these rules lose money, so by default the bot is **quiet**. 
 
 **To turn it back ON:** same place, click the pencil next to `QUIET_MODE`, change the value to `1`, then **Update variable** (or delete the variable, since on is the default).
 The change works from the next hourly run. No code edits needed.
-To move the summary time, add a variable `DAILY_SUMMARY_UTC` in UTC, e.g. `02:30` = 08:00 India time.
+To move the summary time, add a variable `DAILY_SUMMARY_TIME` in 24-hour format, e.g. `07:00` = 7:00 AM or `18:30` = 6:30 PM. The default is `12:01` (12:01 PM). To use another time zone, add `DAILY_SUMMARY_TZ`, e.g. `America/New_York` (US Eastern) or `Europe/London`. The default is `Asia/Kolkata` (India time). Summer/winter clock changes are handled automatically. After a change, the bot sends one "🕐 Daily summary time updated: every day at …" message, and the next summary comes at the new time.
 
 ## 3. Telegram messages
 | message | meaning |

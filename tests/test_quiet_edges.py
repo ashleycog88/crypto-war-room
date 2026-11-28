@@ -10,6 +10,7 @@ DAY = datetime(2026, 11, 28, tzinfo=timezone.utc).timestamp()
 
 def q(cfg, on=True):
     cfg.quiet = on
+    cfg.summary_time = "09:00"  # 09:00 IST = 03:30 UTC
     return cfg
 
 
@@ -47,12 +48,12 @@ def test_ai_log_pruned(cfg, tg):
     assert bot.state["ai_log"] == [[DAY - 3600, "REJECTED"]]
 
 
-# summary_slot boundaries / IST conversion wrap
-def test_slot_and_ist_edges():
+# summary_slot boundaries
+def test_slot_edges():
     assert wr.summary_slot(DAY, "00:00") == "2026-11-28"
     assert wr.summary_slot(DAY - 1, "00:00") == "2026-11-27"
     assert wr.summary_slot(DAY + 23 * 3600 + 59 * 60, "23:59") == "2026-11-28"
-    assert wr.utc_to_ist("20:00") == "01:30" and wr.utc_to_ist("18:30") == "00:00"
+    assert wr.summary_slot(DAY, "01:30", "America/New_York") == "2026-11-27"  # 7 PM ET on 11-27 (1:30 AM that day already passed)
     assert wr.summary_slot(datetime(2027, 1, 1, 1, tzinfo=timezone.utc).timestamp(), "03:30") == "2026-12-31"
 
 
