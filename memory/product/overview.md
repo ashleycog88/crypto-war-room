@@ -36,6 +36,8 @@ A free, always-on, fail-safe Python bot on GitHub Actions that scans the top 50 
 | F-25 | Kid-level GitHub settings guide + how to save files to GitHub (paid button and free copy-paste path) | Trader | 1 and 4 |
 | F-26 | Quiet mode: paper-track every AI-approved setup silently; one plain daily summary at 09:00 IST instead of per-trade messages; BOT ALIVE / BOT DOWN unchanged | Trader | 2b |
 | F-27 | Strategy research lab: test several pre-registered strategy families on 1h/4h/daily candles over ~2 years, honest walk-forward, random-entry baseline, futures-fee and spot-buy-fee models; plain report | Trader | 3 |
+| F-28 | Edge Hunt v2: ≈ 6-year point-in-time history, rolling walk-forward "PASS v2", re-judge near misses, new 2026 literature families (S9–S12) | Trader | 5 |
+| F-29 | Auto paper-watch for anything that passes + daily "real-money readiness" line (✅ ready / ⚠️ not ready) | Trader | 5 |
 
 ## Phases
 - Phase 1 → working, hardened live bot on Binance data, top 50 coins, temporary hold times A 24h / B 4h (configurable), verified offline + real Telegram test messages → F-1..F-19, F-25
@@ -69,6 +71,9 @@ A free, always-on, fail-safe Python bot on GitHub Actions that scans the top 50 
   - [phase4/requirement.md](phase4/requirement.md), [phase4/journeys.md](phase4/journeys.md)
   - Status 2026-11-28 14:45 UTC: Part A merged (PR #5, retest 6/6). Part B: C1 + C2 all REJECTED (C1 ≈ random, one wallet drove profits; C2 R3 fragile, fake pass caught). Part C: S6/S7/S8 all REJECTED (best: top-50 S8 +49% unseen @69th pct; top-50 S6 +21.5% @86.6th pct). Part D: S6+S8 top-50 added to paper-watch (current top-50 only; BTC always eligible), retest 5/5, merged (PR #6, main 94d5dc0). Live: state.json.enc, recorder fresh, self-chaining OK, Healthchecks connected.
   - NEXT (≈ 2026-12-26): recorded-data research (news AI ratings, liquidations, wallet crowd positioning) + review 4 weeks of live paper-watch. Oracle/private server not needed unless a strategy passes or needs sub-minute speed.
+- Phase 5 → Edge Hunt v2 (user 2026-11-29: "you are the boss, make it formidable and earn real money"; full delegation): ≈ 6-year Binance history (2020→2026) with point-in-time coin sets, rolling walk-forward (18-month look-back → 6-month unseen, ≈ 9 windows, "PASS v2"), re-judge S1/S5/S6/S8, new families S9 AdaptiveTrend (arXiv 2602.11708), S10 volatility-spike bounce (kquant.app), S11 selective funding carry vs USDT-earn benchmark, S12 near-miss blend; anything that passes → quiet paper-watch + "real-money readiness" line; nothing passes → live bot unchanged → F-28, F-29
+  - [phase5/requirement.md](phase5/requirement.md), [phase5/journeys.md](phase5/journeys.md)
+  - Parked with reasons: cascade-fade 1–3 min scalper (needs auto execution), 21–23 UTC seasonality, pairs trading, ETF-flow signal.
 
 ## UI/UX Rules
 - The only "UI" is Telegram messages (and reports relayed in chat). HTML-formatted, every dynamic value escaped, emojis kept.

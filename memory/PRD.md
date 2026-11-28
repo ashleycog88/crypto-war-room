@@ -41,3 +41,8 @@ Phase 1 build brief: harden the Crypto War Room bot (Python, GitHub Actions, Tel
 - Tests 202 green 3×; testing agent iterations 11–13 (HIGH funding-window bug found and fixed).
 - Next: recorded-data research in ~4 weeks.
 - 2026-11: S6/S8 eligibility = current top-50 (+BTC for the regime filter) at each rebalance; held coins outside it are sold at that rebalance (priced normally) and can be re-picked after re-entry. Test added; 203 green 3×; testing agent iteration 14 passed (mutation-checked).
+
+## 2026-11 — Phase 5 "Edge Hunt v2" (research only)
+- edge_data.py: Binance archives 2020-01→2026-11 (spot 1h 593 USDT pairs incl. delisted, perp 1h + funding 918, 5m for PIT majors months), Hyperliquid funding top-up for Nov 2026, monthly point-in-time majors/top50 sets (82 months, 0 PIT violations, Q-51 missing 0), relaunch/redenomination splits. Cache backtest_data/edge_v2 (~0.8 GB, gitignored).
+- edge_v2.py: rolling walk-forward PASS v2 (11 unseen windows), old Phase 3 rule side by side, S1/S5/S6/S8 re-judged, S9 AdaptiveTrend, S10 vol-spike, S11 carry, S12 blend; 43 settings; report private_reports/edge_v2/.
+- Result: NOTHING passed PASS v2 → Part D not built; live bot/workflows/state untouched. Tests 219 green 3×; testing agent iterations 15–16.
