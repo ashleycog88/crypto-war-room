@@ -67,6 +67,8 @@ A free, always-on, fail-safe Python bot on GitHub Actions that scans the top 50 
 - Status 2026-11-28: Phase 2c (self-chaining, 12:01 IST summary) merged PR #3, verified on GitHub (github-actions[bot] dispatches). Phase 3b+3c merged PR #4: state.json.enc live, `data` branch recording (Upbit 403 expected). Phase 3 research: NO strategy passed (near misses: S1 breakout longs on majors failed "both halves"; S5 top-3 momentum majors 94.85th pct vs 95 needed). User chose BOTH paper-watching the near misses and Step C research.
 - Phase 4 → Part A paper-watch S1/S5 (daily summary only) + Part B Step C research (C1 Hyperliquid wallet copying, walk-forward; C2 listing/delisting events)
   - [phase4/requirement.md](phase4/requirement.md), [phase4/journeys.md](phase4/journeys.md)
+  - Status 2026-11-28 14:45 UTC: Part A merged (PR #5, retest 6/6). Part B: C1 + C2 all REJECTED (C1 ≈ random, one wallet drove profits; C2 R3 fragile, fake pass caught). Part C: S6/S7/S8 all REJECTED (best: top-50 S8 +49% unseen @69th pct; top-50 S6 +21.5% @86.6th pct). Part D: S6+S8 top-50 added to paper-watch (current top-50 only; BTC always eligible), retest 5/5, merged (PR #6, main 94d5dc0). Live: state.json.enc, recorder fresh, self-chaining OK, Healthchecks connected.
+  - NEXT (≈ 2026-12-26): recorded-data research (news AI ratings, liquidations, wallet crowd positioning) + review 4 weeks of live paper-watch. Oracle/private server not needed unless a strategy passes or needs sub-minute speed.
 
 ## UI/UX Rules
 - The only "UI" is Telegram messages (and reports relayed in chat). HTML-formatted, every dynamic value escaped, emojis kept.
