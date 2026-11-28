@@ -1,57 +1,57 @@
 {
- "updated": 1795854319,
+ "updated": 1795855308,
  "encrypted": true,
  "cursor_locked": false,
  "hours_24": 2,
  "sources": {
   "hl_market": {
-   "last_ok": 1795854181,
-   "n24": 1200,
+   "last_ok": 1795855258,
+   "n24": 1600,
    "every_s": 300,
    "err": ""
   },
   "hl_leaderboard": {
-   "last_ok": 1795850840,
-   "n24": 100,
+   "last_ok": 1795854351,
+   "n24": 200,
    "every_s": 21600,
    "err": ""
   },
   "hl_wallets": {
-   "last_ok": 1795853601,
-   "n24": 136,
+   "last_ok": 1795855284,
+   "n24": 247,
    "every_s": 900,
    "err": "",
    "count": 100
   },
   "hl_fills": {
-   "last_ok": 1795851043,
+   "last_ok": 1795854376,
    "n24": 13485,
    "every_s": 86400,
    "err": ""
   },
   "news": {
-   "last_ok": 1795854182,
-   "n24": 131,
+   "last_ok": 1795855285,
+   "n24": 132,
    "every_s": 300,
    "err": ""
   },
   "news_ai": {
-   "last_ok": 1795853601,
-   "n24": 131,
+   "last_ok": 1795855289,
+   "n24": 132,
    "every_s": 900,
    "err": "",
    "disabled": false
   },
   "listings_okx": {
-   "last_ok": 1795854182,
-   "n24": 456,
+   "last_ok": 1795855290,
+   "n24": 608,
    "every_s": 300,
    "err": "",
    "optional": true
   },
   "listings_binance": {
-   "last_ok": 1795854182,
-   "n24": 480,
+   "last_ok": 1795855290,
+   "n24": 640,
    "every_s": 300,
    "err": "",
    "optional": true
@@ -64,39 +64,39 @@
    "optional": true
   },
   "listings_kucoin": {
-   "last_ok": 1795854183,
-   "n24": 240,
+   "last_ok": 1795855290,
+   "n24": 320,
    "every_s": 300,
    "err": "",
    "optional": true
   },
   "listings": {
-   "last_ok": 1795854183,
+   "last_ok": 1795855290,
    "n24": 98,
    "every_s": 300,
    "err": ""
   },
   "whales": {
-   "last_ok": 1795854319,
-   "n24": 18,
+   "last_ok": 1795855290,
+   "n24": 24,
    "every_s": 300,
    "err": ""
   },
   "liquidations": {
-   "last_ok": 1795854193,
-   "n24": 532,
+   "last_ok": 1795855300,
+   "n24": 578,
    "every_s": 300,
    "err": ""
   },
   "longshort": {
-   "last_ok": 1795853621,
-   "n24": 32,
+   "last_ok": 1795855308,
+   "n24": 48,
    "every_s": 900,
    "err": ""
   },
   "context": {
-   "last_ok": 1795850928,
-   "n24": 3,
+   "last_ok": 1795854397,
+   "n24": 6,
    "every_s": 3600,
    "err": ""
   }
