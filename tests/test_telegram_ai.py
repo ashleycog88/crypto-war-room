@@ -1,5 +1,4 @@
 """Telegram safety, AI review, duplicates, delivery-before-record (JRN-10..17, 41, 53)."""
-import html
 import re
 import time
 from types import SimpleNamespace

@@ -1,0 +1,54 @@
+name: Edge-data recorder (hourly run, data → `data` branch)
+
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: war-room-recorder
+  cancel-in-progress: false
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        timeout-minutes: 8
+        run: pip install -r requirements.txt
+
+      - name: Run recorder (~58 min)
+        timeout-minutes: 63
+        env:
+          DATA_KEY: ${{ secrets.DATA_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          REC_LLM_MODEL: ${{ vars.REC_LLM_MODEL || 'gemini-3.1-flash-lite' }}
+          REC_LLM_FALLBACK: ${{ vars.REC_LLM_FALLBACK || 'gemini-3.5-flash-lite' }}
+          REC_AI_DAILY_CAP: ${{ vars.REC_AI_DAILY_CAP || '300' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REC_DIR: ${{ runner.temp }}/rec_data
+          CHAIN_AT_MINUTE: '50'
+          RUN_MINUTES: '58'
+        run: python recorder.py
+
+      - name: Push recorded data (always)
+        if: always()
+        timeout-minutes: 6
+        env:
+          REC_DIR: ${{ runner.temp }}/rec_data
+        run: python recorder.py --push-only

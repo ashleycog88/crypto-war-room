@@ -5,7 +5,7 @@ Every 5m bar is scored with the LIVE functions from war_room_bot.py on exactly t
 would have seen at that moment (309 closed 5m + 259 closed 1h candles). Trades use the live resolve_trade for the
 live exit style; exit-style variants (b)(c)(d) are the only trade logic defined here.
 """
-import argparse, csv, hashlib, io, json, math, os, pickle, sys, time, zipfile
+import argparse, csv, hashlib, io, json, os, pickle, sys, time, zipfile
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from datetime import datetime, timezone, timedelta
 
@@ -580,7 +580,7 @@ def run(args):
     deriv = load_derivs(coins, start_ms, end_ms, log)
     reg_t, reg_v = btc_regime_series(kl[("BTC/USDT", "1h")], start_ms, end_ms)
     meta = {"_train_end": train_ms}
-    jobs, n_bars = [], int((end_ms - start_ms) / M5)
+    jobs = []
     for c in coins:
         r5, r1 = kl[(c, "5m")], kl[(c, "1h")]
         d = deriv[c]
