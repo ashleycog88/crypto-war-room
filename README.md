@@ -72,11 +72,16 @@ The change works from the next hourly run. No code edits needed.
 To move the summary time, add a variable `DAILY_SUMMARY_TIME` in 24-hour format, e.g. `07:00` = 7:00 AM or `18:30` = 6:30 PM. The default is `12:01` (12:01 PM). To use another time zone, add `DAILY_SUMMARY_TZ`, e.g. `America/New_York` (US Eastern) or `Europe/London`. The default is `Asia/Kolkata` (India time). Summer/winter clock changes are handled automatically. After a change, the bot sends one "🕐 Daily summary time updated: every day at …" message, and the next summary comes at the new time.
 
 ## Paper-watch of the 2 near misses (on by default, no alerts)
-Phase 3 found two strategies that came close to passing. The bot follows them **on paper** and only reports in the daily summary, in a "🔭 Watching (paper, not tradeable yet)" block. It shows what each one holds now, its trades in the last 24 hours, its result after fees since the watch started, and the number of days watched.
+Phase 3 and Part C found four strategies that came close to passing. The bot follows them **on paper** and only reports in the daily summary, in a "🔭 Watching (paper, not tradeable yet)" block. It shows what each one holds now, its trades in the last 24 hours, its result after fees since the watch started, and the number of days watched.
 - **4h breakout (buy only, majors):** buy when a 4-hour candle closes above the highest high of the previous 20 candles, and only while BTC is above its 200-candle average. The stop is 2 ATR below entry. Exit at the next open after a close below the lowest low of the previous 10 candles. Futures fees and funding are counted.
 - **Top-3 momentum (majors, spot):** after every daily close, if BTC is above its 50-day average, hold the 3 majors with the biggest 30-day gain in equal parts; otherwise hold cash. Spot fees are counted.
 - Both use research.py's own code, closed candles only, and fills at the next candle's open. The first summary says "🔭 Started watching 2 near-miss strategies today."
-- To switch it off, put `"PAPER_WATCH": false` in the `BOT_SETTINGS` secret. Settings can be changed the same way, e.g. `"WATCH_S1": {"n": 55}` or `"WATCH_S5": {"k": 5}`.
+- **Funding factor (top 50, futures):** every week (Tuesday close) rank the top-50 coins by their average funding over the last 14 days. Buy the lowest fifth and short the highest fifth, in equal parts. Futures fees and funding are counted.
+- **Vol-managed momentum (top 50, spot):** every week, the top-3 momentum rule (BTC above its 50-day average), sized down when the last 84 days were wild (target 40% yearly volatility, never more than 100% invested). Spot fees are counted.
+- Live funding comes from Hyperliquid (hourly rates ×8 for the 8-hour comparison), because Binance futures data is blocked from US servers; the research used Binance funding, so funding levels and costs can differ a little.
+- Only coins in the bot's current top-50 list (plus BTC) can be picked at a rebalance. A held coin that has left the list is sold at the next rebalance, and it can be picked again once it is back in the list.
+- These two come from `factors.py` (Part C research) and use its own code. The summary shows how many coins each holds and the top names. The first summary after the update says "🔭 Now watching 4 near-miss strategies."
+- To switch everything off, put `"PAPER_WATCH": false` in the `BOT_SETTINGS` secret. Single strategies: `"WATCH_S6": false` or `"WATCH_S8": false`. Settings can be changed the same way, e.g. `"WATCH_S1": {"n": 55}` or `"WATCH_S5": {"k": 5}`.
 - **These are not tradeable. Both failed the Phase 3 honesty rules.**
 
 ## 3. Telegram messages

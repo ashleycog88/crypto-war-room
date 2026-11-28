@@ -144,7 +144,7 @@ def test_daily_summary_block_and_first_start_line(cfg, tg, monkeypatch):
     bot = summary_bot(cfg, tg, monkeypatch, sample_state(now))
     bot.maybe_daily_summary(now)
     text = tg.texts("DAILY SUMMARY")[-1]
-    assert "🔭 Started watching 2 near-miss strategies today." in text
+    assert "🔭 Now watching 4 near-miss strategies." in text
     assert "🔭 <b>Watching (paper, not tradeable yet)</b> — day 4" in text
     assert "4h breakout (buy, majors): holding ETH · 24 h: opened 1, closed 1 (+2.50%)" in text
     assert "since start: +1.20% at 1% risk per trade after fees (1 closed)" in text
@@ -154,7 +154,7 @@ def test_daily_summary_block_and_first_start_line(cfg, tg, monkeypatch):
     bot.state["last_daily_summary"] = "0"
     bot.maybe_daily_summary(now + 60)
     assert len(tg.texts("DAILY SUMMARY")) == 2
-    assert "Started watching" not in tg.texts("DAILY SUMMARY")[-1]
+    assert "Now watching 4" not in tg.texts("DAILY SUMMARY")[-1]
     assert all("DAILY SUMMARY" in t for t in tg.texts())  # paper-watch never sends its own alerts
 
 
@@ -185,7 +185,7 @@ def test_successful_update_is_saved_encrypted_and_survives_restart(cfg, tg, monk
     now = time.time()
     bot = summary_bot(cfg, tg, monkeypatch, None)
     new = sample_state(now)
-    monkeypatch.setattr(pw, "update", lambda st, now, a=None, b=None: new)
+    monkeypatch.setattr(pw, "update", lambda st, now, *a, **k: new)
     bot.maybe_paper_watch(now)
     bot.pw_thread.join(5)
     bot.maybe_paper_watch(now + 1)
@@ -215,3 +215,149 @@ def test_healthcheck_line_three_states(cfg, monkeypatch):
         assert line == f"🩺 Outside watchdog (Healthchecks): {want}"
         hb = wr.format_heartbeat(bot.heartbeat_info(time.time()))
         assert line in hb and "hc-ping" not in hb and "secret-uuid" not in hb
+
+
+def port_inputs():
+    from test_factors import synthetic
+    mx = synthetic()
+    names = ["BTC"] + [f"C{i}" for i in range(1, mx["C"].shape[0])]
+    rows = {b: np.column_stack([mx["days"], mx["O"][i], np.maximum(mx["O"][i], mx["C"][i]) * 1.01,
+                                np.minimum(mx["O"][i], mx["C"][i]) * 0.99, mx["C"][i], mx["V"][i] / mx["C"][i]])
+            for i, b in enumerate(names)}
+    fund = {b: (mx["coins"][i].ft, mx["coins"][i].fn / 8) for i, b in enumerate(names)}
+    return names, rows, fund
+
+
+def test_s6_s8_paper_watch_match_factors():
+    import factors as fx
+    names, rows, fund = port_inputs()
+    for fam in ("s6", "s8"):
+        p = pw.DEFAULTS[fam]
+        coins = []
+        for b in names:
+            c = pw.WatchCoin(b, {"1d": rows[b]}, fund[b] if fam == "s6" else None)
+            c.fn = c.fr * 8
+            coins.append(c)
+        mx = fx.matrices(coins)
+        decide, step, model = fx.s6_decide(mx, p) if fam == "s6" else fx.s8_decide(mx, p)
+        sched = fx.schedule(mx, decide, step)
+        ref = fx.evaluate(mx, sched, step, model)
+        st = pw.port_state(rows["BTC"][0, 0] / 1000)
+        n = len(rows["BTC"])
+        for m in range(215, n):  # one update per daily close, the next open known
+            pw.port_update(st, fam, {b: r[:m] for b, r in rows.items()}, {b: float(r[m, 1]) for b, r in rows.items()},
+                           fund if fam == "s6" else {}, 0)
+        got = [e["net_prev"] for e in st["events"] if e["net_prev"] is not None]
+        assert len(got) >= 10 and len(ref) >= len(got)
+        assert np.allclose(got, [x["net"] for x in ref[:len(got)]], atol=1e-9), fam
+        d_last = int(np.searchsorted(mx["days"], st["d_t"]))
+        L, S, scale, _ = decide(d_last)  # the latest decision (its period hasn't ended, so research has no row yet)
+        assert st["w"] == {names[x]: v for x, v in fx.weights(L, S, scale).items() if v}
+        assert abs(st["equity"] - np.prod([1 + x["net"] / 100 for x in ref[:len(got)]])) < 1e-9
+
+
+def test_s6_s8_update_catch_up_matches_factors(monkeypatch):
+    """End to end through update(): 400-bar windows, funding only from the start asked for, 17-day gaps."""
+    import factors as fx
+    names, rows, fund = port_inputs()
+    days = rows["BTC"][:, 0]
+    cur = {"m": 0}
+
+    def klines(base, interval, limit, now):
+        r = rows[base][:cur["m"] + 1][-limit:]
+        return r[:-1].copy(), float(r[-1, 1])
+
+    def funding(name, start_ms):
+        if name not in fund:
+            return np.array([], np.int64), np.array([])
+        ft, fr = fund[name]
+        k = (ft >= start_ms) & (ft <= days[cur["m"]] + 5 * 60_000)
+        return ft[k], fr[k]
+    monkeypatch.setattr(pw, "get_klines", klines)
+    monkeypatch.setattr(pw, "get_funding", funding)
+    monkeypatch.setattr(pw, "s1_update", lambda *a, **k: None)
+    monkeypatch.setattr(pw, "s5_update", lambda *a, **k: None)
+    start = days[0] + 420 * fx.DAY
+    for fam in ("s6", "s8"):
+        coins = []
+        for b in names:
+            c = pw.WatchCoin(b, {"1d": rows[b]}, fund[b] if fam == "s6" else None)
+            c.fn = c.fr * 8
+            coins.append(c)
+        mx = fx.matrices(coins)
+        decide, step, model = fx.s6_decide(mx, pw.DEFAULTS[fam]) if fam == "s6" else fx.s8_decide(mx, pw.DEFAULTS[fam])
+        ref = fx.evaluate(mx, [x for x in fx.schedule(mx, decide, step) if days[x[0]] >= start - fx.DAY], step, model)
+        st = pw.new_state(start / 1000)
+        for m in range(int(np.searchsorted(days, start)) + 1, len(days), 17):  # bot down 16 of every 17 days
+            cur["m"] = m
+            st = pw.update(st, days[m] / 1000 + 300, coins=["BTC"], top=names, s6=fam == "s6", s8=fam == "s8")
+        got = [e["net_prev"] for e in st[fam]["events"] if e["net_prev"] is not None]
+        assert len(got) >= 8, fam
+        assert np.allclose(got, [x["net"] for x in ref[:len(got)]], atol=1e-9), fam
+        assert not any("skipped" in n for n in st[fam]["notes"]), fam
+
+
+def test_watch_s6_s8_switches(cfg):
+    assert wr.apply_settings(cfg, '{"WATCH_S6": false, "WATCH_S8": false}') == []
+    assert cfg.watch_s6 is False and cfg.watch_s8 is False
+
+
+def test_summary_shows_portfolio_watch_lines():
+    now = time.time()
+    st = sample_state(now)
+    st["s6"] = dict(pw.port_state(now - 86400), w={"BTC": 0.1, "ETH": 0.1, "SOL": 0.1, "XRP": 0.1, "DOGE": -0.2,
+                                                    "ADA": -0.2}, equity=1.021,
+                    events=[{"t": int((now - 3600) * 1000), "bought": ["BTC"], "sold": ["LINK"], "net_prev": 0.3}])
+    st["s8"] = dict(pw.port_state(now - 86400), w={"SOL": 0.21, "BNB": 0.21, "ETH": 0.21}, scale=0.63, equity=0.99,
+                    events=[{"t": int((now - 9 * 86400) * 1000), "bought": ["SOL"], "sold": [], "net_prev": None}])
+    text = "\n".join(pw.summary_lines(st, now))
+    assert "🔭 Now watching 4 near-miss strategies." in text
+    assert ("Funding factor (top 50, long low / short high funding, futures): long 4 (BTC, ETH, SOL …) · "
+            "short 2 (ADA, DOGE) · 24 h: rebalanced (bought 1, sold 1) · since start: +2.10% after fees · day 2") in text
+    assert ("Vol-managed momentum (top 50, spot): 3 coins at 63% exposure (BNB, ETH, SOL) · 24 h: no rebalance · "
+            "since start: -1.00% after fees") in text
+
+
+def test_notes_counted_past_cap():
+    ps = pw.port_state(0)
+    for i in range(pw.KEEP + 5):
+        pw.add_note(ps, f"n{i}")
+    assert len(ps["notes"]) == pw.KEEP and ps["n_notes"] == pw.KEEP + 5 and ps["notes"][-1] == f"n{pw.KEEP + 4}"
+
+
+def test_s6_s8_held_coin_leaving_top_is_sold_and_repickable_after_reentry():
+    names, rows, fund = port_inputs()
+    n = len(rows["BTC"])
+
+    def run(fam, out_coin=None, out_from=None, out_to=None):
+        st, hist = pw.port_state(rows["BTC"][0, 0] / 1000), []
+        for m in range(215, n):
+            elig = set(names)
+            if out_coin and out_from <= rows["BTC"][m - 1, 0] <= out_to:
+                elig.discard(out_coin)
+            before = st["d_t"]
+            pw.port_update(st, fam, {b: r[:m] for b, r in rows.items()}, {b: float(r[m, 1]) for b, r in rows.items()},
+                           fund if fam == "s6" else {}, 0, elig)
+            if st["d_t"] != before:
+                hist.append((st["d_t"], dict(st["w"]), st["events"][-1], st["equity"]))
+        return hist
+    checked = 0
+    for fam in ("s6", "s8"):
+        base = run(fam)
+        cand = [(k, b) for k in range(2, len(base) - 6) for b in base[k][1] if b != "BTC"
+                and any(b in base[j][1] for j in range(k + 4, len(base)))]
+        if not cand:
+            continue
+        k, coin = cand[0]
+        t_out, t_in = base[k + 1][0], base[k + 3][0]  # out of the top 50 for 3 rebalances
+        hist = run(fam, coin, t_out, t_in)
+        assert [h[0] for h in hist] == [h[0] for h in base]
+        assert coin in hist[k][1]                                       # held before it dropped out
+        assert coin not in hist[k + 1][1] and coin in hist[k + 1][2]["sold"]  # sold at the next rebalance
+        assert all(coin not in hist[j][1] for j in range(k + 1, k + 4))      # not eligible while out
+        assert abs(hist[k + 1][2]["net_prev"] - base[k + 1][2]["net_prev"]) < 1e-12  # priced normally
+        for j in range(k + 4, len(base)):                                # back in: same decisions as research
+            assert hist[j][1] == base[j][1]
+        assert any(coin in hist[j][1] for j in range(k + 4, len(base)))  # picked again after re-entry
+        checked += 1
+    assert checked >= 1
