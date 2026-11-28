@@ -1,12 +1,12 @@
 {
- "updated": 1795863218,
+ "updated": 1795864156,
  "encrypted": true,
  "cursor_locked": false,
- "hours_24": 4,
+ "hours_24": 5,
  "sources": {
   "hl_market": {
-   "last_ok": 1795863178,
-   "n24": 4300,
+   "last_ok": 1795864098,
+   "n24": 4600,
    "every_s": 300,
    "err": ""
   },
@@ -17,8 +17,8 @@
    "err": ""
   },
   "hl_wallets": {
-   "last_ok": 1795863200,
-   "n24": 515,
+   "last_ok": 1795864120,
+   "n24": 525,
    "every_s": 900,
    "err": "",
    "count": 100
@@ -30,28 +30,28 @@
    "err": ""
   },
   "news": {
-   "last_ok": 1795863201,
-   "n24": 134,
+   "last_ok": 1795864121,
+   "n24": 135,
    "every_s": 300,
    "err": ""
   },
   "news_ai": {
-   "last_ok": 1795863201,
-   "n24": 134,
+   "last_ok": 1795864139,
+   "n24": 135,
    "every_s": 900,
    "err": "",
    "disabled": false
   },
   "listings_okx": {
-   "last_ok": 1795863202,
-   "n24": 1634,
+   "last_ok": 1795864140,
+   "n24": 1748,
    "every_s": 300,
    "err": "",
    "optional": true
   },
   "listings_binance": {
-   "last_ok": 1795863202,
-   "n24": 1720,
+   "last_ok": 1795864140,
+   "n24": 1840,
    "every_s": 300,
    "err": "",
    "optional": true
@@ -64,33 +64,33 @@
    "optional": true
   },
   "listings_kucoin": {
-   "last_ok": 1795863202,
-   "n24": 860,
+   "last_ok": 1795864140,
+   "n24": 920,
    "every_s": 300,
    "err": "",
    "optional": true
   },
   "listings": {
-   "last_ok": 1795863202,
+   "last_ok": 1795864140,
    "n24": 98,
    "every_s": 300,
    "err": ""
   },
   "whales": {
-   "last_ok": 1795863202,
-   "n24": 77,
+   "last_ok": 1795864140,
+   "n24": 90,
    "every_s": 300,
    "err": ""
   },
   "liquidations": {
-   "last_ok": 1795863210,
-   "n24": 696,
+   "last_ok": 1795864149,
+   "n24": 702,
    "every_s": 300,
    "err": ""
   },
   "longshort": {
-   "last_ok": 1795863218,
-   "n24": 120,
+   "last_ok": 1795864156,
+   "n24": 128,
    "every_s": 900,
    "err": ""
   },
