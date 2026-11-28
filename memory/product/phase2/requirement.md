@@ -84,3 +84,14 @@ Q-15 Tag: Trust.Overfitting
 - REQ-151 [event] When quiet mode first starts, the system shall send a one-time plain notice: "🤫 Quiet mode on — I'll keep testing silently and send one summary every day at 09:00 (India time)."
 - REQ-152 [optional] Where QUIET_MODE=0, the system shall behave exactly as before (per-trade messages).
 - REQ-153 [always] Quiet mode shall be switchable without code edits (GitHub repository variable or workflow env), documented in README in kid-level steps.
+
+## Phase 2c — Self-chaining runs (GitHub's scheduler proved unreliable)
+Evidence 2026-11-27: after the v10 push at 20:25 UTC, ZERO scheduled runs fired for either war_room.yml ('7 * * * *') or watchdog.yml ('37 */2 * * *') in 3 hours; v9's 5-minute cron fired only twice that day. Only manual runs ran (chained via the concurrency queue).
+
+- REQ-154b [event] When a run has completed at least one healthy scan cycle and reaches about minute 50 of its loop, the bot shall dispatch the next run of war_room.yml via the GitHub API (workflow_dispatch with the run's GITHUB_TOKEN), so it waits in the concurrency queue and starts as soon as this run ends.
+- REQ-155b [always] The bot shall dispatch at most one next run per run, and only if no other run of the workflow is already queued/pending (interpreted).
+- REQ-156b [unwanted] If the bot has had no healthy cycle in the last 10 minutes, then it shall not dispatch (cron and the outside watchdog take over), so a broken version cannot loop.
+- REQ-157b [unwanted] If the dispatch API call fails, then the bot shall log it, retry once, and mention "⚠️ next run not queued" in the next BOT ALIVE.
+- REQ-158b [always] war_room.yml shall keep the hourly cron as a backup and add only the extra permission actions: write.
+- REQ-159b [always] The watchdog shall also be triggered by the main bot's end-of-run step? No — instead the README and final guide shall recommend the free outside Healthchecks.io check (HEALTHCHECK_URL) as the only watchdog independent of GitHub, with kid-level setup steps including its Telegram integration.
+- REQ-160b [always] BOT ALIVE shall show "🔗 next run queued ✅" or "❌ not queued (reason)".

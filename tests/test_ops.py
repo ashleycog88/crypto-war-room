@@ -31,7 +31,7 @@ def test_jrn35_main_workflow():
     assert "workflow_dispatch:" in y and "pull_request" not in y
     assert re.search(r"concurrency:\s*\n\s*group: \S+\s*\n\s*cancel-in-progress: false", y)
     perms = re.search(r"permissions:\s*\n((?:\s+\S.*\n)+?)\n", y).group(1)
-    assert perms.strip() == "contents: write"
+    assert [p.strip() for p in perms.strip().splitlines()] == ["contents: write", "actions: write"]
     assert "timeout-minutes: 75" in y and "timeout-minutes: 63" in y
     assert "::add-mask::" in y
     assert re.search(r"if: always\(\)\s*\n\s*timeout-minutes: \d+\s*\n\s*run: python war_room_bot.py --commit-state", y)
@@ -252,7 +252,7 @@ def _run_cli(args, tmp_path, extra=None):
     env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
     env.update({"TELEGRAM_BOT_TOKEN": f"  {FAKE_TOKEN}\n", "TELEGRAM_CHAT_ID": FAKE_CHAT, "LLM_API_KEY": FAKE_KEY,
                 "STATE_FILE": str(tmp_path / "state.json"), "HTTPS_PROXY": "http://127.0.0.1:9",
-                "HTTP_PROXY": "http://127.0.0.1:9", "https_proxy": "http://127.0.0.1:9",
+                "HTTP_PROXY": "http://127.0.0.1:9", "https_proxy": "http://127.0.0.1:9", "SPOT_SOURCES": "BINANCE",
                 "http_proxy": "http://127.0.0.1:9", "NO_PROXY": "", "no_proxy": ""})
     env.update(extra or {})
     return subprocess.run([sys.executable, os.path.join(ROOT, "war_room_bot.py"), *args], env=env,
@@ -327,7 +327,8 @@ def test_l4_sigint_saves_state(tmp_path):
     import signal as sg
     env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
     env.update({"STATE_FILE": str(tmp_path / "s.json"), "DRY_RUN": "1", "RUN_MINUTES": "5", "SCAN_INTERVAL": "1",
-                "HTTPS_PROXY": "http://127.0.0.1:9", "https_proxy": "http://127.0.0.1:9", "NO_PROXY": ""})
+                "HTTPS_PROXY": "http://127.0.0.1:9", "https_proxy": "http://127.0.0.1:9", "NO_PROXY": "",
+                "SPOT_SOURCES": "BINANCE"})
     p = subprocess.Popen([sys.executable, os.path.join(ROOT, "war_room_bot.py")], env=env, cwd=str(tmp_path),
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     time.sleep(6)

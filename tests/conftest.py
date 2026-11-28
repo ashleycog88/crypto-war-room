@@ -20,7 +20,8 @@ def clean_env(monkeypatch):
               "STATE_FILE",
               "DRY_RUN", "RUN_MINUTES", "SCAN_INTERVAL", "FEE_PCT_SPOT", "FEE_PCT_FUTURES", "MAX_HOLD_A_HOURS",
               "MAX_HOLD_B_HOURS", "TOP_N_COINS", "USE_DERIV_SCORE", "HEALTHCHECK_URL", "MSG_PREFIX", "TG_MAX_SENDS",
-              "GITHUB_ACTIONS", "CHECKPOINT_PUSH", "GITHUB_WORKSPACE", "QUIET_MODE", "DAILY_SUMMARY_UTC"]:
+              "GITHUB_ACTIONS", "CHECKPOINT_PUSH", "GITHUB_WORKSPACE", "QUIET_MODE", "DAILY_SUMMARY_UTC", "DAILY_SUMMARY_TIME", "DAILY_SUMMARY_TZ", "GITHUB_TOKEN", "GITHUB_REPOSITORY", "GITHUB_REF_NAME",
+              "GITHUB_API_URL", "CHAIN_AT_MINUTE", "SPOT_SOURCES"]:
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setattr(wr, "TG_GAP_S", 0.0)
     yield

@@ -54,6 +54,17 @@ A free, always-on, fail-safe Python bot on GitHub Actions that scans the top 50 
   - [phase3/journeys.md](phase3/journeys.md)
 - Phase 4 → If a strategy passes: implement it in the live bot as paper alerts first (then edge watchers: news, whale trades, smart-money wallets — old F-23), apply user's choices → F-23, F-24, F-25
 
+## Roadmap approved 2026-11-27 ("make it formidable", time no object, $0 unless essential)
+- A = Phase 3 strategy research (bigger timeframes, 2y data) — starts after Phase 2c save.
+- B = Phase 3b edge-data recorder (news+AI ratings, Hyperliquid top-100 wallets positions/fills, Binance whale trades, liquidations, long/short, listings, market context) → `data` branch — starts ASAP (time-bound).
+  - [phase3b/requirement.md](phase3b/requirement.md), [phase3b/journeys.md](phase3b/journeys.md)
+- C = smart-money copy research (walk-forward wallet selection), listing/delisting event study (Upbit/Binance/OKX; post-listing fade), macro-event filter (FOMC/CPI).
+- D = combine only proven signals into one War Room score + pro risk rules (0.5–1% risk/trade, max open trades, correlation cap, daily loss stop) → 4 weeks paper trading.
+- E = private always-on server: Oracle Cloud Always Free (A1 Ampere, now 2 OCPU/12 GB; idle-reclaim risk → consider Pay-As-You-Go with budget alert, still $0), home region: user could only select a US region (recommended US Midwest Chicago or US West San Jose for A1 capacity; Ashburn/Phoenix acceptable) → same US data constraints as GitHub runners (data-api.binance.vision, Binance fapi blocked; Hyperliquid/OKX/Gate/KuCoin for derivatives); repo made private afterwards; Healthchecks.io outside watchdog. User chose to PLAN IT NOW (account signup now, build after A/B).
+- User decisions: no Solana/Ethereum memecoin wallets; daily summary 12:01 PM India time (Asia/Kolkata).
+- Oracle signup failed (form wouldn't let the user continue) → user chose Plan B now: Phase 3c privacy lock on free GitHub (encrypted state + data, hidden BOT_SETTINGS, quiet logs); Oracle/private server decided later.
+  - [phase3c/requirement.md](phase3c/requirement.md), [phase3c/journeys.md](phase3c/journeys.md)
+
 ## UI/UX Rules
 - The only "UI" is Telegram messages (and reports relayed in chat). HTML-formatted, every dynamic value escaped, emojis kept.
 - Grade obvious in the first line ("A-GRADE" / "B-GRADE"); market label obvious ("Spot or Futures" / "Futures only").

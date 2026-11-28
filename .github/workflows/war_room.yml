@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: war-room-bot
@@ -53,8 +54,11 @@ jobs:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_FALLBACK_MODELS: ${{ secrets.LLM_FALLBACK_MODELS }}
           HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHAIN_AT_MINUTE: '50'
           QUIET_MODE: ${{ vars.QUIET_MODE || '1' }}
-          DAILY_SUMMARY_UTC: ${{ vars.DAILY_SUMMARY_UTC || '03:30' }}
+          DAILY_SUMMARY_TIME: ${{ vars.DAILY_SUMMARY_TIME || '12:01' }}
+          DAILY_SUMMARY_TZ: ${{ vars.DAILY_SUMMARY_TZ || 'Asia/Kolkata' }}
           RUN_MINUTES: '58'
           SCAN_INTERVAL: '60'
         run: python war_room_bot.py
