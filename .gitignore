@@ -21,3 +21,12 @@ credentials.json
 .credentials
 backtest_data/
 backtest_trades.csv
+
+# research/backtest outputs stay private (Phase 3c)
+private_reports/
+backtest_report.md
+backtest_results.json
+research_report.md
+research_*.json
+*.csv
+rec_data/

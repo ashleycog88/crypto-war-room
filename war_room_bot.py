@@ -9,6 +9,11 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
 
+try:
+    import datalock
+except ImportError:  # pragma: no cover
+    datalock = None
+
 try:  # heavy deps are optional so --commit-state / --watchdog still work if pip install failed
     import numpy as np
     import pandas as pd
@@ -87,8 +92,27 @@ def log(*parts):
     print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {redact(msg)}", flush=True)
 
 
+def detail_on():
+    """Full detail in logs only when LOG_DETAIL=1, or locally (outside GitHub Actions) unless LOG_DETAIL=0."""
+    d = os.environ.get("LOG_DETAIL", "").strip()
+    return d == "1" or (d != "0" and os.environ.get("GITHUB_ACTIONS") != "true")
+
+
+def dlog(*parts):
+    if detail_on():
+        log(*parts)
+
+
 def err_text(e):
-    return redact(f"{type(e).__name__}: {e}")[:300]
+    if detail_on():
+        return redact(f"{type(e).__name__}: {e}")[:300]
+    reason = re.sub(r"https?://\S+|\S+\.(com|io|xyz|vision|org|fi|me)\S*", "<url>", redact(str(e)))
+    reason = re.sub(r"0x[0-9a-fA-F]+|\d+([.,:]\d+)*", "#", reason)
+    return f"{type(e).__name__}: {reason[:60]}"
+
+
+def tb_text(limit):
+    return redact(traceback.format_exc(limit=limit)) if detail_on() else "(traceback hidden; set LOG_DETAIL=1)"
 
 
 # ---------------------------------------------------------------- config
@@ -108,6 +132,80 @@ def env_num(name, default, cast=float):
 def clean_token(raw):
     m = re.search(r"(\d{6,15}:[A-Za-z0-9_-]{25,60})", raw or "")
     return m.group(1) if m else ""
+
+
+def _num(lo=None, hi=None, integer=False):
+    def check(v):
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or (integer and v != int(v)):
+            raise ValueError
+        if (lo is not None and v < lo) or (hi is not None and v > hi):
+            raise ValueError
+        return int(v) if integer else float(v)
+    return check
+
+
+def _bool(v):
+    if v in (True, False, 0, 1):
+        return bool(v)
+    raise ValueError
+
+
+def _coins(v):
+    if not isinstance(v, list) or not all(isinstance(c, str) for c in v):
+        raise ValueError
+    return {c.strip().upper().split("/")[0] for c in v if c.strip()}
+
+
+def _obj(v):
+    if not isinstance(v, dict):
+        raise ValueError
+    return v
+
+
+# BOT_SETTINGS key → (target: "g" = module constant / "c" = Config attribute, attribute name, validator)
+SETTINGS = {
+    "A_MIN": ("g", "A_MIN", _num(1, 100, True)), "B_MIN": ("g", "B_MIN", _num(1, 100, True)),
+    "SL_ATR": ("g", "SL_ATR", _num(0.1, 20)), "TP1_ATR": ("g", "TP1_ATR", _num(0.1, 20)),
+    "TP2_ATR": ("g", "TP2_ATR", _num(0.1, 40)), "OB_PENALTY": ("g", "OB_PENALTY", _num(0, 100, True)),
+    "COOLDOWN_S": ("g", "COOLDOWN_S", _num(0, 86400 * 7, True)),
+    "MIN_TP1_FEE_MULT": ("c", "min_tp1_fee_mult", _num(0, 50)),
+    "MAX_HOLD_A_HOURS": ("c", "max_hold_a", _num(0.1, 24 * 14)), "MAX_HOLD_B_HOURS": ("c", "max_hold_b", _num(0.1, 24 * 14)),
+    "TOP_N_COINS": ("c", "top_n", _num(5, 300, True)), "EXCLUDE_COINS": ("c", "exclude_coins", _coins),
+    "USE_DERIV_SCORE": ("c", "use_deriv", _bool), "FEE_PCT_SPOT": ("c", "fee_spot", _num(0, 2)),
+    "FEE_PCT_FUTURES": ("c", "fee_fut", _num(0, 2)), "STRATEGY": ("c", "strategy", _obj),
+}
+
+
+def apply_settings(cfg, raw):
+    """Apply the secret BOT_SETTINGS JSON overrides. Returns the list of ignored keys (bad JSON/key/value)."""
+    cfg.strategy = {}
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError
+    except ValueError:
+        return ["(not valid JSON)"]
+    bad = []
+    a_min, b_min = A_MIN, B_MIN
+    for k, v in data.items():
+        spec = SETTINGS.get(k)
+        try:
+            if spec is None:
+                raise ValueError
+            val = spec[2](v)
+        except (ValueError, TypeError, OverflowError):
+            bad.append(str(k)[:30])
+            continue
+        if spec[0] == "g":
+            globals()[spec[1]] = val
+        else:
+            setattr(cfg, spec[1], val)
+    if B_MIN >= A_MIN:  # grades must stay ordered
+        globals().update(A_MIN=a_min, B_MIN=b_min)
+        bad += [k for k in ("A_MIN", "B_MIN") if k in data and k not in bad]
+    return bad
 
 
 def clean_chat(raw):
@@ -152,13 +250,17 @@ class Config:
         try:
             ZoneInfo(self.summary_tz)
         except Exception:
-            log(f"Unknown DAILY_SUMMARY_TZ {self.summary_tz!r}; using Asia/Kolkata")
+            dlog(f"Unknown DAILY_SUMMARY_TZ {self.summary_tz!r}; using Asia/Kolkata")
             self.summary_tz = "Asia/Kolkata"
         self.gh_token = env_str("GITHUB_TOKEN")
         self.gh_repo = env_str("GITHUB_REPOSITORY")
         self.gh_ref = env_str("GITHUB_REF_NAME", "main")
         self.gh_api = env_str("GITHUB_API_URL", "https://api.github.com")
         self.chain_at_minute = env_num("CHAIN_AT_MINUTE", 50)
+        self.data_key = env_str("DATA_KEY")
+        self.recorder_status_url = env_str("RECORDER_STATUS_URL") or (
+            f"https://raw.githubusercontent.com/{self.gh_repo}/data/data/status.json" if self.gh_repo else "")
+        self.settings_ignored = apply_settings(self, env_str("BOT_SETTINGS"))
         self.__dict__.update(over)
 
     def max_hold(self, grade):
@@ -166,7 +268,7 @@ class Config:
 
 
 def mask_secrets(cfg):
-    vals = [cfg.raw_token, cfg.tg_token, cfg.tg_chat, cfg.llm_key, cfg.healthcheck_url, cfg.gh_token]
+    vals = [cfg.raw_token, cfg.tg_token, cfg.tg_chat, cfg.llm_key, cfg.healthcheck_url, cfg.gh_token, cfg.data_key]
     for v in vals:
         register_secret(v)
     if os.environ.get("GITHUB_ACTIONS") == "true":
@@ -576,6 +678,45 @@ def save_state(path, state):
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
+
+
+# ---------------------------------------------------------------- encrypted state (DATA_KEY)
+def state_key(cfg):
+    return datalock.derive_key(cfg.data_key, datalock.read_salt()) if cfg.data_key else None
+
+
+def load_state_secure(path, key, now=None):
+    """Returns (state, locked). With a key: state.json.enc, or the plaintext state.json to migrate on next save.
+    locked=True means the .enc file could not be decrypted: nothing may be saved over it."""
+    enc = path + ".enc"
+    if key is None or not os.path.exists(enc):
+        return load_state(path, now), False
+    try:
+        st = upgrade_state(json.loads(datalock.read_plain(enc, key)), now)
+    except (datalock.LockError, ValueError) as e:
+        log(f"Encrypted state unreadable ({type(e).__name__}); running from an empty in-memory state, not saving")
+        return empty_state(), True
+    if os.path.exists(path):  # both exist (key was removed for a while): keep the newer memory
+        plain = load_state(path, now)
+        if plain.get("last_cycle_time", 0) > st.get("last_cycle_time", 0):
+            log("Plaintext state is newer than the encrypted one; using it (re-encrypted on next save)")
+            return plain, False
+    return st, False
+
+
+def save_state_secure(path, state, key, locked=False):
+    if locked:
+        return
+    if key is None:
+        return save_state(path, state)
+    datalock.write_atomic(path + ".enc", datalock.encrypt(key, json.dumps(state, separators=(",", ":")).encode()))
+    if os.path.exists(path):
+        os.remove(path)  # migrated: the plaintext copy leaves the working tree (git history keeps old versions)
+
+
+def push_path(cfg):
+    enc = cfg.state_file + ".enc"
+    return enc if cfg.data_key and os.path.exists(enc) else cfg.state_file
 
 
 # ---------------------------------------------------------------- telegram
@@ -1308,6 +1449,7 @@ def format_heartbeat(info):
         lines.append(f"⚠️ Skipped (bad data): {esc(', '.join(coin_name(p) for p in info['skipped']))}")
     if info.get("chain"):
         lines.append(f"🔗 Next run {esc(info['chain'])}")
+    lines += info.get("extra", [])
     return "\n".join(lines)
 
 
@@ -1355,7 +1497,37 @@ def summary_slot(now, hhmm, tz="UTC"):
     return day.isoformat()
 
 
-def format_daily_summary(state, now, max_lines=12):
+def recorder_stalled(status, now, max_age=3 * 3600):
+    if not status:
+        return []
+    return sorted(n for n, s in (status.get("sources") or {}).items()
+                  if not s.get("disabled") and not s.get("optional")
+                  and now - (s.get("last_ok") or 0) > max(max_age, 2 * (s.get("every_s") or 0)))
+
+
+def recorder_warnings(status, now):
+    out = []
+    bad = recorder_stalled(status, now)
+    if bad:
+        out.append(f"⚠️ Recorder: {esc(', '.join(bad))} stalled")
+    if status and status.get("cursor_locked"):
+        out.append("⚠️ Recorder can't unlock its memory — check the DATA_KEY secret")
+    return out
+
+
+def recorder_line(status, now):
+    if not status:
+        return "📼 Recorder: ❓ status not available"
+    src = status.get("sources") or {}
+    bad = recorder_stalled(status, now)
+    n = lambda k: (src.get(k) or {}).get("n24", 0)
+    parts = (f"news {n('news')} · wallets {(src.get('hl_wallets') or {}).get('count', 0)} · "
+             f"whales {'✅' if 'whales' not in bad else '❌'} · listings {n('listings')}")
+    head = "✅" if not bad else f"❌ {esc(', '.join(bad))} failing"
+    return f"📼 Recorder: {head} {status.get('hours_24', 0)}/24 hours recorded ({parts})"
+
+
+def format_daily_summary(state, now, max_lines=12, extra=()):
     since = now - 86400
     side = lambda d: "buy" if d == "LONG" else "short"
     trades = [t for t in state["active_trades"] + state["closed_trades"] if isinstance(t, dict)]
@@ -1387,6 +1559,7 @@ def format_daily_summary(state, now, max_lines=12):
     lines.append(f"🤖 AI: approved {ai.count('APPROVED')} · rejected {ai.count('REJECTED')} · "
                  f"unclear {ai.count('UNCLEAR')}"
                  + (f" · not checked {ai.count('UNAVAILABLE')}" if "UNAVAILABLE" in ai else ""))
+    lines += list(extra)
     lines.append("🧪 Paper test only — don't trade these with real money.")
     return "\n".join(lines)
 
@@ -1414,15 +1587,17 @@ GUIDE_TEXT = "\n".join([
 GIT_ID = ["-c", "user.name=WarRoomBot", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com"]
 
 
-def git_sync(repo_dir, state_path, branch="main", attempts=5, message="bot: update state.json", backoff=2.0):
-    """Push the bot's state.json: fetch → reset --hard origin/branch → restore bot state.json → commit → push."""
+def git_sync(repo_dir, state_path, branch="main", attempts=5, message="bot: update state", backoff=2.0):
+    """Push the bot's state file: fetch → reset --hard origin/branch → restore bot state file → commit → push.
+    For state.json.enc the old plaintext state.json is removed from the tree in the same commit."""
     if not os.path.exists(state_path):
         log("git sync: no state file to push")
         return False
+    name = os.path.basename(state_path)
     tmpd = tempfile.mkdtemp(prefix="wr-state-")
-    saved = os.path.join(tmpd, "state.json")
+    saved = os.path.join(tmpd, name)
     shutil.copy2(state_path, saved)
-    target = os.path.join(repo_dir, "state.json")
+    target = os.path.join(repo_dir, name)
 
     def g(*args, check=True):
         return subprocess.run(["git", *GIT_ID, *args], cwd=repo_dir, capture_output=True, text=True, timeout=90,
@@ -1433,13 +1608,15 @@ def git_sync(repo_dir, state_path, branch="main", attempts=5, message="bot: upda
                 g("fetch", "--quiet", "origin", branch)
                 g("reset", "--quiet", "--hard", f"origin/{branch}")
                 shutil.copy2(saved, target)
-                g("add", "state.json")
+                if name.endswith(".enc"):
+                    g("rm", "--quiet", "--ignore-unmatch", name[:-4])
+                g("add", name)
                 if g("diff", "--cached", "--quiet", check=False).returncode == 0:
-                    log("git sync: state.json already up to date on remote")
+                    log(f"git sync: {name} already up to date on remote")
                     return True
                 g("commit", "--quiet", "-m", message)
                 g("push", "--quiet", "origin", f"HEAD:{branch}")
-                log(f"git sync: state.json pushed (attempt {i + 1})")
+                log(f"git sync: {name} pushed (attempt {i + 1})")
                 return True
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
                 log(f"git sync attempt {i + 1} failed: {redact(getattr(e, 'stderr', '') or e).strip()[:240]}")
@@ -1460,10 +1637,48 @@ def file_hash(path):
 
 
 # ---------------------------------------------------------------- bot
+
+def chain_dispatch(c, workflow):
+    """Queue the next run of `workflow` unless one is already waiting. Returns the BOT ALIVE status text."""
+    base = f"{c.gh_api}/repos/{c.gh_repo}/actions/workflows/{workflow}"
+    for st in ("queued", "pending", "waiting", "requested"):
+        try:
+            r = _gh_request("GET", f"{base}/runs", c.gh_token, params={"status": st, "per_page": 5})
+            if r.status_code == 200 and (r.json() or {}).get("total_count", 0) > 0:
+                log(f"Next run already {st}; not dispatching another")
+                return "queued ✅ (one was already waiting)"
+        except Exception as e:
+            log(f"Run-queue check failed ({err_text(e)[:80]}); dispatching anyway")
+            break
+    why = "?"
+    for attempt in (1, 2):
+        try:
+            r = _gh_request("POST", f"{base}/dispatches", c.gh_token, json_body={"ref": c.gh_ref})
+            if r.status_code in (200, 201, 204):
+                log("Next run dispatched (workflow_dispatch)")
+                return "queued ✅"
+            why = f"HTTP {r.status_code}"
+        except Exception as e:
+            why = type(e).__name__
+        log(f"Next-run dispatch attempt {attempt} failed: {why}")
+        if attempt == 1:
+            _sleep(CHAIN_RETRY_S)
+    return f"❌ not queued (dispatch failed: {why})"
+
+
 class Bot:
     def __init__(self, cfg, state=None, spot=None, deriv=None, tg=None, ai=None):
         self.cfg = cfg
-        self.state = state if state is not None else load_state(cfg.state_file)
+        self.key = state_key(cfg)
+        self.locked = False
+        if state is None:
+            state, self.locked = load_state_secure(cfg.state_file, self.key)
+        self.state = state
+        if self.locked:  # wrong DATA_KEY: don't repeat one-time messages from an empty in-memory state
+            self.state.update(v10_live_sent=True, guide_sent=True, quiet_notice_sent=True,
+                              summary_announced=sched_key(cfg), ai_gate_migrated=True)
+        self.lock_warned = False
+        self.recorder = {"t": 0, "status": None}
         self.spot = spot or SpotRouter()
         self.deriv = deriv or DerivRouter()
         self.tg = tg or Telegram(cfg)
@@ -1485,7 +1700,35 @@ class Bot:
         self.chain_done = False
 
     def save(self):
-        save_state(self.cfg.state_file, self.state)
+        save_state_secure(self.cfg.state_file, self.state, self.key, self.locked)
+
+    def maybe_lock_warning(self):
+        if self.locked and not self.lock_warned and self.tg.send("⚠️ Can't unlock my memory — check the DATA_KEY secret"):
+            self.lock_warned = True
+
+    def recorder_status(self, now):
+        """Public health-only status.json of the recorder (cached 10 min); None if unknown."""
+        url = self.cfg.recorder_status_url
+        if url and now - self.recorder["t"] >= 600:
+            self.recorder["t"] = now
+            try:
+                r = _http_get(url, 10)
+                self.recorder["status"] = r.json() if r.status_code == 200 else None
+            except Exception as e:
+                log(f"Recorder status fetch failed: {type(e).__name__}")
+                self.recorder["status"] = None
+        return self.recorder["status"]
+
+    def privacy_lines(self):
+        if self.cfg.data_key:
+            out = []
+        elif os.path.exists(self.cfg.state_file + ".enc"):
+            out = ["🔒 Encrypted memory found but DATA_KEY is missing — add the DATA_KEY secret back"]
+        else:
+            out = ["🔓 Data not encrypted — add DATA_KEY"]
+        if self.cfg.settings_ignored:
+            out.append(f"⚠️ Some BOT_SETTINGS ignored: {esc(', '.join(self.cfg.settings_ignored))}")
+        return out
 
     # -- setup
     def start(self):
@@ -1535,7 +1778,7 @@ class Bot:
         else:
             coins, self.coin_source = BUILTIN_COINS[:self.cfg.top_n], "built-in list"
         self.coins = coins
-        log(f"Coin list ({self.coin_source}): {len(coins)} coins: {', '.join(c.split('/')[0] for c in coins)}")
+        dlog(f"Coin list ({self.coin_source}): {len(coins)} coins: {', '.join(c.split('/')[0] for c in coins)}")
 
     # -- data
     def _fetch_one(self, src, sym, now_ms):
@@ -1561,7 +1804,7 @@ class Bot:
         try:
             out["ob_imb"] = ob_imbalance(src.order_book(sym, 20))
         except Exception as e:
-            log(f"{sym}: order book error: {err_text(e)}")
+            dlog(f"{sym}: order book error: {err_text(e)}")
             out["ob_imb"] = 0.0
         return out
 
@@ -1574,7 +1817,7 @@ class Bot:
             p.shutdown(wait=False, cancel_futures=True)  # a stop signal must not wait for queued fetches
         self.skipped = {s: r["err"] for s, r in res.items() if r.get("err")}
         for s, e in self.skipped.items():
-            log(f"{s}: skipped this scan: {e}")
+            dlog(f"{s}: skipped this scan: {e}")
         return res
 
     def _safe_fetch(self, src, sym, now_ms):
@@ -1588,7 +1831,7 @@ class Bot:
         for t in list(self.state["active_trades"]):
             sym = t["symbol"]
             if t.get("exchange") not in (src.name, "UNKNOWN", None):
-                log(f"{sym}: entered on {t['exchange']}, data now from {src.name}: keeping open until it is back")
+                dlog(f"{sym}: entered on {t['exchange']}, data now from {src.name}: keeping open until it is back")
                 continue
             try:
                 if not src.has(sym):
@@ -1599,7 +1842,7 @@ class Bot:
                 events = resolve_trade(t, rows, prices.get(sym), now, self.cfg.max_hold(t["grade"]),
                                        self.cfg.fee_spot, self.cfg.fee_fut)
             except Exception as e:
-                log(f"{sym}: trade check failed, keeping open: {err_text(e)}")
+                dlog(f"{sym}: trade check failed, keeping open: {err_text(e)}")
                 continue
             for ev in events:
                 if ev["type"] == "TP1":
@@ -1660,7 +1903,7 @@ class Bot:
             if sym in open_syms or now - self.state["last_alert_time"].get(sym, 0) < COOLDOWN_S:
                 continue
             if is_pegged(price, m["df1h"]):
-                log(f"{sym}: skipped, pegged/stable-like price")
+                dlog(f"{sym}: skipped, pegged/stable-like price")
                 self.pegged.add(sym)
                 continue
             if tp1_too_small(res["dir"], res["price"], res["tp1"], self.cfg.fee_spot, self.cfg.fee_fut,
@@ -1673,7 +1916,7 @@ class Bot:
                 continue
             if res["dir"] == "SHORT":
                 if self.deriv.known_no_perp(base):
-                    log(f"{sym}: SHORT setup suppressed (no perpetual market known)")
+                    dlog(f"{sym}: SHORT setup suppressed (no perpetual market known)")
                     continue
                 res["market"] = market_label("SHORT", unverified=not d)
             else:
@@ -1687,11 +1930,11 @@ class Bot:
         res["max_hold_h"] = hold
         verdict, note = self.ai.review(res, start_by=self.cycle_t0 + CYCLE_AI_BUDGET_S)
         if verdict == "DEFER":
-            log(f"{sym}: AI review deferred to next cycle (AI throttle); nothing recorded")
+            dlog(f"{sym}: AI review deferred to next cycle (AI throttle); nothing recorded")
             return False
         self.state["ai_log"].append([int(now), verdict])
         if verdict in ("REJECTED", "UNCLEAR"):
-            log(f"{sym}: alert dropped by AI review ({verdict})")
+            dlog(f"{sym}: alert dropped by AI review ({verdict})")
             self.state["ai_rejected_candle"][sym] = res["candle_ts"]
             key = "ai_rejected" if verdict == "REJECTED" else "ai_unclear"
             self.state["hour_stats"][key] = self.state["hour_stats"].get(key, 0) + 1
@@ -1699,7 +1942,7 @@ class Bot:
             return False
         text = format_alert(res, src.name, verdict, note, hold, res.get("deriv_src"))
         if not self.cfg.quiet and not self.tg.send(text):
-            log(f"{sym}: alert not delivered; trade NOT recorded, will retry next cycle")
+            dlog(f"{sym}: alert not delivered; trade NOT recorded, will retry next cycle")
             self.state["ai_log"].pop()
             return False
         trade = {"id": f"{sym}-{res['candle_ts']}", "symbol": sym, "dir": res["dir"], "grade": res["grade"],
@@ -1714,7 +1957,7 @@ class Bot:
         self.state["last_alert_candle"][sym] = res["candle_ts"]
         self.state["hour_stats"]["alerts"] += 1
         self.save()
-        log(f"{sym}: {res['grade']}-GRADE {res['dir']} {res['score']}/100 "
+        dlog(f"{sym}: {res['grade']}-GRADE {res['dir']} {res['score']}/100 "
             + ("paper trade recorded silently (quiet mode)" if self.cfg.quiet else "alert delivered and trade recorded"))
         return True
 
@@ -1744,6 +1987,7 @@ class Bot:
                 "ai_rejected": self.state["hour_stats"]["ai_rejected"],
                 "ai_unclear": self.state["hour_stats"].get("ai_unclear", 0), "unavailable": self.unavailable,
                 "skipped": sorted(set(self.skipped) | self.pegged), "quiet": self.cfg.quiet,
+                "extra": self.privacy_lines() + recorder_warnings(self.recorder_status(now), now),
                 "chain": self.chain or (self.state.get("last_chain") if self.cfg.gh_token else None)}
 
     def maybe_heartbeat(self, now):
@@ -1804,7 +2048,8 @@ class Bot:
             return
         if last >= key:
             return
-        if self.tg.send(format_daily_summary(self.state, now)):  # not sent → retried next cycle (no outbox)
+        extra = [recorder_line(self.recorder_status(now), now)] if self.cfg.recorder_status_url else []
+        if self.tg.send(format_daily_summary(self.state, now, extra=extra + self.privacy_lines())):  # not sent → retried next cycle
             self.state["last_daily_summary"] = key
             self.save()
 
@@ -1818,32 +2063,7 @@ class Bot:
         if not [t for t in self.state["cycle_times"] if now - t <= 600]:
             self.chain = "❌ not queued (no healthy scan in the last 10 min)"
             return
-        base = f"{c.gh_api}/repos/{c.gh_repo}/actions/workflows/{CHAIN_WORKFLOW}"
-        for st in ("queued", "pending", "waiting", "requested"):
-            try:
-                r = _gh_request("GET", f"{base}/runs", c.gh_token, params={"status": st, "per_page": 5})
-                if r.status_code == 200 and (r.json() or {}).get("total_count", 0) > 0:
-                    self.chain, self.chain_done = "queued ✅ (one was already waiting)", True
-                    log(f"Next run already {st}; not dispatching another")
-                    return
-            except Exception as e:
-                log(f"Run-queue check failed ({err_text(e)[:80]}); dispatching anyway")
-                break
-        why = "?"
-        for attempt in (1, 2):
-            try:
-                r = _gh_request("POST", f"{base}/dispatches", c.gh_token, json_body={"ref": c.gh_ref})
-                if r.status_code in (200, 201, 204):
-                    self.chain, self.chain_done = "queued ✅", True
-                    log("Next run dispatched (workflow_dispatch)")
-                    return
-                why = f"HTTP {r.status_code}"
-            except Exception as e:
-                why = type(e).__name__
-            log(f"Next-run dispatch attempt {attempt} failed: {why}")
-            if attempt == 1:
-                _sleep(CHAIN_RETRY_S)
-        self.chain, self.chain_done = f"❌ not queued (dispatch failed: {why})", True
+        self.chain, self.chain_done = chain_dispatch(c, CHAIN_WORKFLOW), True
 
     def healthcheck(self):
         if not self.cfg.healthcheck_url:
@@ -1856,11 +2076,11 @@ class Bot:
     def maybe_checkpoint(self, now, force=False):
         if not self.cfg.checkpoint or (not force and now - self.last_push < CHECKPOINT_S):
             return
-        h = file_hash(self.cfg.state_file)
+        h = file_hash(push_path(self.cfg))
         if h == self.last_push_hash:
             return
         self.last_push = now
-        if git_sync(self.cfg.repo_dir, self.cfg.state_file, self.cfg.git_branch, attempts=3):
+        if git_sync(self.cfg.repo_dir, push_path(self.cfg), self.cfg.git_branch, attempts=3):
             self.last_push_hash = h
 
     def _safe(self, name, fn, *a):
@@ -1868,7 +2088,7 @@ class Bot:
             return fn(*a)
         except Exception as e:
             log(f"{name} error (continuing): {err_text(e)}")
-            log(redact(traceback.format_exc(limit=4)))
+            log(tb_text(4))
             return None
 
     # -- one cycle
@@ -1890,6 +2110,7 @@ class Bot:
         self._safe("guide message", self.maybe_guide)
         self._safe("quiet notice", self.maybe_quiet_notice)
         self._safe("daily summary", self.maybe_daily_summary, now)
+        self._safe("lock warning", self.maybe_lock_warning)
         scan = list(dict.fromkeys(self.coins + [t["symbol"] for t in self.state["active_trades"]]))
         avail = [s for s in scan if src.has(s)]
         self.unavailable = [s for s in scan if not src.has(s)]
@@ -1934,7 +2155,8 @@ class Bot:
         self.cycle_stats.append({"secs": round(dt, 2), "pairs_ok": ok, "pairs": len(avail), "src": src.name,
                                  "deriv": self.deriv_used, "fetched_1h": n1h, "fetched_5m": n5,
                                  "weight": getattr(src, "used_weight", None), "http_429": getattr(src, "http_429", 0)})
-        log(f"Cycle done in {dt:.1f}s · {src.name} · pairs ok {ok}/{len(avail)} · 1h refetched {n1h} · "
+        log(f"Cycle {len(self.cycle_stats)} done in {dt:.1f}s · pairs ok {ok}/{len(avail)}")
+        dlog(f"Cycle done in {dt:.1f}s · {src.name} · pairs ok {ok}/{len(avail)} · 1h refetched {n1h} · "
             f"5m refetched {n5} · deriv {self.deriv_used or 'none'} · BTC {self.regime} · "
             f"open trades {len(self.state['active_trades'])} · weight {getattr(src, 'used_weight', '-')}")
         self._safe("checkpoint", self.maybe_checkpoint, now)
@@ -1961,7 +2183,7 @@ def run_loop(cfg, bot=None):
                 bot.cycle()
             except Exception as e:
                 log(f"Cycle error (continuing): {err_text(e)}")
-                log(redact(traceback.format_exc(limit=6)))
+                log(tb_text(6))
             nxt = t0 + cfg.scan_interval
             if nxt >= end:
                 break
@@ -1973,10 +2195,20 @@ def run_loop(cfg, bot=None):
 
 
 def run_watchdog(cfg):
+    enc = cfg.state_file + ".enc"
+    if not cfg.data_key and os.path.exists(enc) and not os.path.exists(cfg.state_file):
+        log("Watchdog: state is encrypted but DATA_KEY is missing; can't check (add the DATA_KEY secret)")
+        return 0
     try:
-        with open(cfg.state_file, "r", encoding="utf-8") as f:
-            state = json.load(f)
+        if cfg.data_key and os.path.exists(enc):
+            state = json.loads(datalock.read_plain(enc, state_key(cfg)))
+        else:
+            with open(cfg.state_file, "r", encoding="utf-8") as f:
+                state = json.load(f)
     except Exception as e:
+        if cfg.data_key and os.path.exists(enc):
+            log(f"Watchdog: encrypted state can't be unlocked ({type(e).__name__}); the bot reports this itself")
+            return 0
         log(f"Watchdog: state unreadable: {err_text(e)}")
         state = {}
     msg = watchdog_message(state, time.time())
@@ -2116,7 +2348,7 @@ def main(argv=None):
         if args.diagnose:
             return run_diagnose(cfg)
         if args.commit_state:
-            git_sync(cfg.repo_dir, cfg.state_file, cfg.git_branch)
+            git_sync(cfg.repo_dir, push_path(cfg), cfg.git_branch)
             return 0
         if args.test_messages:
             return run_test_messages(cfg)
@@ -2130,7 +2362,7 @@ def main(argv=None):
             log(f"Stopped by {e}")
             return 0
         log(f"FATAL: {err_text(e)}")
-        log(redact(traceback.format_exc(limit=8)))
+        log(tb_text(8))
         return 1
 
 

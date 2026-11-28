@@ -1,13 +1,11 @@
 """Market data, scoring, grades, coin universe, labels (JRN-1..9, 48, 49, 51)."""
-import math
 import time
 
-import numpy as np
 import pandas as pd
 import pytest
 
 import war_room_bot as wr
-from fakes import FakeSpot, install_scores, make_bot, mk_rows, TGRecorder
+from fakes import FakeSpot, install_scores, make_bot, mk_rows
 
 NOW_MS = 1_800_000_000_000 // 3_600_000 * 3_600_000 + 1_234_567
 

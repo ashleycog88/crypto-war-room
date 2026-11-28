@@ -11,7 +11,9 @@ Every hour GitHub starts the bot. It runs for about 58 minutes and scans the top
 | `.github/workflows/war_room.yml` | hourly run at minute :07 (and the "Run workflow" button) |
 | `.github/workflows/watchdog.yml` | every 2 hours at :37. Sends **BOT DOWN** if no scan has finished for 2 hours |
 | `.github/workflows/diagnostics.yml` | manual check of which data sources work from GitHub |
-| `state.json` | the bot's memory (open trades, records, cooldowns). The bot updates it. Don't edit it by hand |
+| `state.json` | the bot's memory (open trades, records, cooldowns). The bot updates it. Don't edit it by hand. With `DATA_KEY` it becomes the encrypted `state.json.enc` |
+| `datalock.py` + `datalock.salt` | encryption helper (AES-256-GCM) and its public salt; also a `decrypt` command for research |
+| `recorder.py` + `.github/workflows/recorder.yml` | the edge-data recorder (hourly at :23), see below |
 | `tests/` | offline tests (`pip install pytest==9.2.0 && pytest tests -q`) |
 
 ## 1. GitHub secrets (Settings → Secrets and variables → Actions → New repository secret)
@@ -24,6 +26,8 @@ Every hour GitHub starts the bot. It runs for about 58 minutes and scans the top
 | `LLM_MODEL` | `gemini-3.5-flash-lite` |
 | `LLM_FALLBACK_MODELS` | optional. Models to try in order if the main one fails, separated by commas. Default `gemini-3.1-flash-lite,gemini-3.6-flash`. The AI gets at most ~30 s per alert in total |
 | `HEALTHCHECK_URL` | strongly recommended: a free https://healthchecks.io ping URL. It is the only watchdog that works even if GitHub stops starting the bot (see "Outside watchdog" below) |
+| `DATA_KEY` | strongly recommended: a long secret passphrase (e.g. 6+ random words). It locks the bot's memory and all recorded data so nobody can read them in this public repo. **Write it down somewhere safe — without it the encrypted data can never be read again.** Until it is set, BOT ALIVE shows "🔓 Data not encrypted — add DATA_KEY" |
+| `BOT_SETTINGS` | optional hidden tunables as JSON, e.g. `{"MIN_TP1_FEE_MULT": 5, "OB_PENALTY": 10}`. Overrides the defaults without showing them in public files. Unknown keys or bad values are ignored, and BOT ALIVE lists them |
 
 Never link a billing account to the Gemini key. The free tier is enough, and the bot backs off when Google says "too many requests".
 
@@ -84,6 +88,34 @@ You can add these as `env:` lines in `war_room.yml`. Defaults are in brackets:
 
 ## 5. Changing files for free
 Open the file on GitHub → pencil icon → paste the new content → *Commit changes*. The bot keeps your edits. If you and the bot both change `state.json`, the bot's copy wins.
+
+## Privacy (free public repo, everything valuable locked)
+**Turn on encryption (once):** 1) Think of a long passphrase (6+ random words) and write it on paper or in your password manager. 2) GitHub → **Settings → Secrets and variables → Actions → Secrets tab → New repository secret**. 3) Name `DATA_KEY`, paste the passphrase, **Add secret**. 4) Done: from the next run the bot and recorder lock everything, and the "🔓" warning disappears. Never change or delete this secret, or old data can't be read.
+- **Encryption:** with `DATA_KEY` set, the bot's memory is stored as `state.json.enc` and every recorded data file as `.jsonl.gz.enc` (AES-256-GCM; the key is made from your passphrase plus the public salt in `datalock.salt`). On the first run with the key, the old `state.json` is converted and removed from the latest version. Older versions stay in git history, so they still show what was there before.
+- **Wrong key:** the bot never overwrites the locked file. It warns "⚠️ Can't unlock my memory — check the DATA_KEY secret" and keeps scanning.
+- **Hidden settings:** put tunables in the `BOT_SETTINGS` secret (keys: `A_MIN`, `B_MIN`, `SL_ATR`, `TP1_ATR`, `TP2_ATR`, `OB_PENALTY`, `COOLDOWN_S`, `MIN_TP1_FEE_MULT`, `MAX_HOLD_A_HOURS`, `MAX_HOLD_B_HOURS`, `TOP_N_COINS`, `EXCLUDE_COINS` (list), `USE_DERIV_SCORE`, `FEE_PCT_SPOT`, `FEE_PCT_FUTURES`, `STRATEGY` (object for future strategies)).
+- **Quiet public logs:** on GitHub, Actions logs show only health lines (cycle done, counts, push ok, source failures without details). No coins, prices, scores, AI replies or wallet addresses. For local debugging run with `LOG_DETAIL=1`.
+- **Private results:** backtest/research outputs (`backtest_report.md`, `research_report.md`, CSV/JSON results) are git-ignored. The earlier public backtest report was moved out of the repo into the ignored `private_reports/` folder.
+- **Reading encrypted files (research):** `DATA_KEY='your passphrase' python datalock.py decrypt FILE.jsonl.gz.enc > out.jsonl`. A wrong key or a changed file gives a clear error.
+
+## Edge-data recorder (`recorder.py`, workflow `recorder.yml`)
+It records free public data that has no history you can download later, so every day counts. Data goes **only** to a separate `data` branch (main stays small), as new hourly files `data/YYYY/MM/DD/HH_<source>-<chunk>.jsonl.gz.enc`. `data/status.json` is public health only. It runs hourly like the bot, queues its own next run at minute 50, and pushes every 15 minutes.
+
+| source | what | how often | where from |
+|---|---|---|---|
+| `hl_market` | funding, open interest, mark/oracle price, premium, 24h volume for every Hyperliquid perp | 5 min | Hyperliquid `metaAndAssetCtxs` |
+| `hl_leaderboard` / `hl_wallets` / `hl_fills` | top-100 "smart" wallets (rule below), their open positions, and their fills | once per run / 15 min / daily | Hyperliquid leaderboard, `clearinghouseState`, `userFillsByTime` |
+| `news` (+ `news_ai`) | headlines from CoinDesk, Cointelegraph, Decrypt, The Block, Bitcoin Magazine, CryptoSlate, rated by Gemini (coins, sentiment −2..+2, category, urgency) | 5 min (AI 15 min) | RSS feeds; Gemini on its own model `REC_LLM_MODEL` (default `gemini-3.1-flash-lite`, fallback `gemini-3.5-flash-lite`) with a daily cap `REC_AI_DAILY_CAP` (300), so the live bot's AI is never starved. When the cap or AI is hit, headlines are stored "unrated" and rated later |
+| `listings` | new listing / delisting announcements | 5 min | OKX ✅, Binance ✅, KuCoin ✅ (added as a free fallback), Upbit ❌ (HTTP 403 from US servers; kept as best-effort) |
+| `whales` | per coin per 5 min: number and USD of aggressive buys/sells ≥ $100k (top-10 coins) or ≥ $25k (others) | live stream | Binance public trade stream `data-stream.binance.vision` |
+| `liquidations` | per coin per 5 min: long/short liquidated USD | 5 min | OKX public liquidation orders |
+| `longshort` | long/short account ratio for BTC, ETH and the top 10 | 15 min | OKX Rubik |
+| `context` | Fear & Greed, BTC dominance, total market cap, stablecoin supply | hourly | alternative.me, CoinGecko, DefiLlama |
+
+Smart-wallet rule: account value ≥ $100k, 30-day PnL > 0, all-time ROI > 0. HLP/vault addresses and market makers (30-day volume > 300× account value) are excluded. Ranked by 30-day PnL, top 100 kept. The selection with its inputs is stored, so it can be checked later.
+Every record has `obs` (when it was recorded, UTC ms) and `event_ts` (when it happened, when known). Research must only use `obs`, so it never looks ahead.
+The daily summary shows a line like `📼 Recorder: ✅ 24/24 hours recorded (news 412 · wallets 100 · whales ✅ · listings 3)`. BOT ALIVE warns `⚠️ Recorder: <source> stalled` if a source has had no successful fetch for 3 hours.
+Check all sources by hand: `python recorder.py --probe`. Run it outside GitHub (e.g. a home server): `RUN_MINUTES=0 REC_PUSH=0 REC_DIR=/path python recorder.py`.
 
 ## Data sources
 - Prices, candles and order books come from Binance public market data at `https://data-api.binance.vision`. It works from US GitHub runners, where `api.binance.com` is blocked.

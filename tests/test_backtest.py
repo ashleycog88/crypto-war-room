@@ -1,6 +1,5 @@
 """Phase 2 backtest: parity with the live code, no look-ahead, exit styles, metrics, simulation rules (JRN-54..67)."""
 import inspect
-import time
 
 import numpy as np
 import pytest

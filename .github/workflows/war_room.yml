@@ -54,6 +54,8 @@ jobs:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_FALLBACK_MODELS: ${{ secrets.LLM_FALLBACK_MODELS }}
           HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+          DATA_KEY: ${{ secrets.DATA_KEY }}
+          BOT_SETTINGS: ${{ secrets.BOT_SETTINGS }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CHAIN_AT_MINUTE: '50'
           QUIET_MODE: ${{ vars.QUIET_MODE || '1' }}
@@ -63,7 +65,9 @@ jobs:
           SCAN_INTERVAL: '60'
         run: python war_room_bot.py
 
-      - name: Save state.json (always, even if the bot step failed)
+      - name: Save state (always, even if the bot step failed)
         if: always()
         timeout-minutes: 6
+        env:
+          DATA_KEY: ${{ secrets.DATA_KEY }}
         run: python war_room_bot.py --commit-state

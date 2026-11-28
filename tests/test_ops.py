@@ -34,7 +34,7 @@ def test_jrn35_main_workflow():
     assert [p.strip() for p in perms.strip().splitlines()] == ["contents: write", "actions: write"]
     assert "timeout-minutes: 75" in y and "timeout-minutes: 63" in y
     assert "::add-mask::" in y
-    assert re.search(r"if: always\(\)\s*\n\s*timeout-minutes: \d+\s*\n\s*run: python war_room_bot.py --commit-state", y)
+    assert re.search(r"if: always\(\)\s*\n\s*timeout-minutes: \d+\s*\n(\s*env:\s*\n\s*DATA_KEY: .*\n)?\s*run: python war_room_bot.py --commit-state", y)
     assert "RUN_MINUTES: '58'" in y and "SCAN_INTERVAL: '60'" in y and "cache: 'pip'" in y
     for f in ("war_room.yml", "watchdog.yml", "diagnostics.yml"):
         for use in re.findall(r"uses:\s*(\S+)(.*)", wf(f)):
