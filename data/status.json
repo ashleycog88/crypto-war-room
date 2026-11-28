@@ -1,0 +1,104 @@
+{
+ "updated": 1795851846,
+ "encrypted": true,
+ "cursor_locked": false,
+ "hours_24": 1,
+ "sources": {
+  "hl_market": {
+   "last_ok": 1795851751,
+   "n24": 400,
+   "every_s": 300,
+   "err": ""
+  },
+  "hl_leaderboard": {
+   "last_ok": 1795850840,
+   "n24": 100,
+   "every_s": 21600,
+   "err": ""
+  },
+  "hl_wallets": {
+   "last_ok": 1795851775,
+   "n24": 113,
+   "every_s": 900,
+   "err": "",
+   "count": 100
+  },
+  "hl_fills": {
+   "last_ok": 1795851043,
+   "n24": 13485,
+   "every_s": 86400,
+   "err": ""
+  },
+  "news": {
+   "last_ok": 1795851776,
+   "n24": 130,
+   "every_s": 300,
+   "err": ""
+  },
+  "news_ai": {
+   "last_ok": 1795851827,
+   "n24": 120,
+   "every_s": 900,
+   "err": "",
+   "disabled": false
+  },
+  "listings_okx": {
+   "last_ok": 1795851827,
+   "n24": 152,
+   "every_s": 300,
+   "err": "",
+   "optional": true
+  },
+  "listings_binance": {
+   "last_ok": 1795851827,
+   "n24": 160,
+   "every_s": 300,
+   "err": "",
+   "optional": true
+  },
+  "listings_upbit": {
+   "last_ok": 0,
+   "n24": 0,
+   "every_s": 300,
+   "err": "RuntimeError: HTTP 403",
+   "optional": true
+  },
+  "listings_kucoin": {
+   "last_ok": 1795851828,
+   "n24": 80,
+   "every_s": 300,
+   "err": "",
+   "optional": true
+  },
+  "listings": {
+   "last_ok": 1795851828,
+   "n24": 98,
+   "every_s": 300,
+   "err": ""
+  },
+  "whales": {
+   "last_ok": 1795851828,
+   "n24": 4,
+   "every_s": 300,
+   "err": ""
+  },
+  "liquidations": {
+   "last_ok": 1795851838,
+   "n24": 493,
+   "every_s": 300,
+   "err": ""
+  },
+  "longshort": {
+   "last_ok": 1795851846,
+   "n24": 16,
+   "every_s": 900,
+   "err": ""
+  },
+  "context": {
+   "last_ok": 1795850928,
+   "n24": 3,
+   "every_s": 3600,
+   "err": ""
+  }
+ }
+}
