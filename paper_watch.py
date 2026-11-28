@@ -94,10 +94,17 @@ def _record(st, t, now):
         return
     net = rs.net(t, "F")
     R = net / max(t["risk"], 1e-6)
+    migrate_tot_net(st)  # before this trade is added (no double count)
     st["closed"] = (st["closed"] + [{"coin": t["coin"], "entry_t": t["entry_t"], "exit_t": t["exit_t"],
                                      "entry": t["entry"], "exit": t["exit"], "why": t["why"], "net": round(net, 4),
                                      "R": round(R, 4), "at": int(now)}])[-KEEP:]
     st["tot_R"], st["n"] = st["tot_R"] + R, st["n"] + 1
+    st["tot_net"] += net  # % of capital ×20 (each trade uses 1/20, as in edge_v2)
+    wk = s1_week(t["exit_t"])
+    w = st["wk_net"]
+    w[str(wk)] = w.get(str(wk), 0.0) + net / 20
+    for k in sorted(w, key=int)[:-30]:
+        del w[k]
 
 
 def s1_update(st, p, bars, funding, start_ms, now):
@@ -245,7 +252,67 @@ def add_note(ps, text):
     ps["n_notes"] = ps.get("n_notes", 0) + 1
 
 
-def update(st, now, over_s1=None, over_s5=None, coins=None, top=None, s6=True, s8=True):
+def migrate_tot_net(s1):
+    """Phase 5 states have no tot_net: start from the trades still saved (all of them unless more than KEEP)."""
+    if "tot_net" not in s1:
+        s1["tot_net"] = float(sum(t["net"] for t in s1["closed"]))
+        s1["tot_net_partial"] = s1["n"] > len(s1["closed"])
+    if "wk_net" not in s1:  # weekly S1 sums for the blend, seeded from the saved trades (mid-week upgrade)
+        s1["wk_net"] = {}
+        for t in s1["closed"]:
+            k = str(s1_week(t["exit_t"]))
+            s1["wk_net"][k] = s1["wk_net"].get(k, 0.0) + t["net"] / 20
+
+
+def s1_week(exit_t):
+    return fx.ANCHOR + DAY + ((exit_t - fx.ANCHOR - DAY) // (7 * DAY)) * 7 * DAY  # edge_v2.weekly's week
+
+
+# ---------------------------------------------------------------- S12: near-miss blend (edge_v2.py's own functions)
+S12_LAG = 7 * DAY + 6 * 3_600_000  # a week is final once every part's period that started in it has closed
+
+
+def s12_state(now):
+    return {"started": int(now), "hist": {k: {} for k in ("S1", "S5", "S6", "S8")}, "equity": 1.0, "w": {},
+            "rows": [], "notes": []}
+
+
+def _periods(events):
+    """Part periods as edge_v2 sees them: each rebalance's net belongs to the period that started one event earlier."""
+    return [{"t": a["t"], "net": b["net_prev"]} for a, b in zip(events, events[1:]) if b.get("net_prev") is not None]
+
+
+def s12_streams(st):
+    import edge_v2 as ev
+    s1 = ev.weekly([{"exit_t": t["exit_t"], "net": t["net"]} for t in st["s1"]["closed"]], "trades")
+    s1.update({int(k): v for k, v in st["s1"].get("wk_net", {}).items()})  # complete even after the 60-trade cap
+    return {"S1": s1,
+            "S5": ev.weekly(_periods(st["s5"]["events"]), "p"), "S6": ev.weekly(_periods(st["s6"]["events"]), "p"),
+            "S8": ev.weekly(_periods(st["s8"]["events"]), "p")}
+
+
+def s12_update(st, now):
+    """Store each part's weekly return once the week is final, then let edge_v2.blend make the weights and result."""
+    import edge_v2 as ev
+    ps = st["s12"]
+    start, end = ps["started"] * 1000, int(now * 1000) - S12_LAG
+    weeks = [x["t"] for x in ev.blend({}, start, end)]
+    cur = s12_streams(st)
+    for k, h in ps["hist"].items():
+        for wk in weeks:
+            if str(wk) not in h:
+                if wk not in cur[k]:  # edge_v2 counts a part with no result that week as 0
+                    add_note(ps, f"week {bt_iso(wk)}: no {k} result, counted as 0 (as in edge_v2)")
+                h[str(wk)] = float(cur[k].get(wk, 0.0))
+    rows = ev.blend({k: {int(w): r for w, r in h.items()} for k, h in ps["hist"].items()}, start, end)
+    old = len(ps["rows"])
+    ps["rows"] = [{"t": r["t"], "net": round(r["net"], 6), "w": {k: round(v, 4) for k, v in r["w"].items()},
+                   "at": ps["rows"][i]["at"] if i < old else int(now)} for i, r in enumerate(rows)]
+    ps["equity"] = float(np.prod([1 + r["net"] / 100 for r in rows])) if rows else 1.0
+    ps["w"] = ps["rows"][-1]["w"] if rows else {}
+
+
+def update(st, now, over_s1=None, over_s5=None, coins=None, top=None, s6=True, s8=True, s12=True):
     """Returns the new paper-watch state; raises if any S1/S5 fetch fails (the caller keeps the old state).
     S6/S8 problems only skip S6/S8 for this update (their old state is kept, with a note)."""
     st = copy.deepcopy(st) if st else new_state(now)
@@ -290,6 +357,15 @@ def update(st, now, over_s1=None, over_s5=None, coins=None, top=None, s6=True, s
             except Exception as e:
                 st[fam] = old
                 add_note(st[fam], f"update skipped ({type(e).__name__}); positions kept")
+    migrate_tot_net(st["s1"])
+    if s12:
+        st.setdefault("s12", s12_state(now))
+        old = copy.deepcopy(st["s12"])
+        try:
+            s12_update(st, now)
+        except Exception as e:
+            st["s12"] = old
+            add_note(st["s12"], f"update skipped ({type(e).__name__}); results kept")
     st["last_ok"] = int(now)
     return st
 
@@ -301,7 +377,10 @@ def summary_lines(st, now, coin_name=str):
     since_ms = (now - 86400) * 1000
     s1, s5 = st["s1"], st["s5"]
     day = int((now - st["started"]) // 86400) + 1
-    out = [] if st.get("announced4") else ["🔭 Now watching 4 near-miss strategies."]
+    if "s12" in st and not st.get("announced5"):
+        out = ["🔭 Now watching 5 near-miss strategies (added the blend)."]
+    else:
+        out = [] if st.get("announced4") or "s12" in st else ["🔭 Now watching 4 near-miss strategies."]
     out.append(f"🔭 <b>Watching (paper, not tradeable yet)</b> — day {day}")
     longs = {b: v for b, v in s1["open"].items() if v.get("side", "LONG") == "LONG"}
     opened = sum(1 for v in longs.values() if v["entry_t"] > since_ms) + \
@@ -338,6 +417,15 @@ def summary_lines(st, now, coin_name=str):
         pday = int((now - ps["started"]) // 86400) + 1
         out.append(f"  • {name}: {hold} · 24 h: {chg} · since start: {(ps['equity'] - 1) * 100:+.2f}% after fees"
                    f" · day {pday}")
+    b = st.get("s12")
+    if b:
+        new = [r for r in b["rows"] if r["at"] > now - 86400]
+        chg = f"{(np.prod([1 + r['net'] / 100 for r in new]) - 1) * 100:+.2f}% (week added)" if new else "no new week"
+        wts = ", ".join(f"{k} {v * 100:.0f}%" for k, v in sorted(b["w"].items())) or "equal until 4 weeks of history"
+        thru = f" (weeks up to {bt_iso(b['rows'][-1]['t'])[:10]})" if b["rows"] else " (first result about 2 weeks after start)"
+        out.append(f"  • Blend of the 4 above (weekly, calmer parts get more): weights {wts} · 24 h: {chg} · "
+                   f"since start: {(b['equity'] - 1) * 100:+.2f}% after fees{thru} · day "
+                   f"{int((now - b['started']) // 86400) + 1}")
     if st["last_ok"] and now - st["last_ok"] > 8 * 3600:
         out.append(f"  ⚠️ Watch data not updated for {int((now - st['last_ok']) // 3600)} h (positions kept)")
     return out

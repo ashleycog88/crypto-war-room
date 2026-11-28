@@ -15,6 +15,8 @@ Every hour GitHub starts the bot. It runs for about 58 minutes and scans the top
 | `datalock.py` + `datalock.salt` | encryption helper (AES-256-GCM) and its public salt; also a `decrypt` command for research |
 | `recorder.py` + `.github/workflows/recorder.yml` | the edge-data recorder (hourly at :23), see below |
 | `research.py` | Phase 3 strategy research (`python research.py`; results only in the gitignored `private_reports/`) |
+| `crash_watch.py` / `recap.py` | the 🚨 crash heads-up rules and the 📊 Sunday recap (plain functions the bot calls) |
+| `edge_data.py` / `edge_v2.py` / `crash_replay.py` | Phase 5/6 research: 6-year Binance archives, walk-forward judge, crash-watch replay (results only in `private_reports/`) |
 | `paper_watch.py` | quietly paper-watches the 2 Phase 3 near misses using research.py's own rules (daily summary only) |
 | `tests/` | offline tests (`pip install pytest==9.2.0 && pytest tests -q`) |
 
@@ -81,7 +83,8 @@ Phase 3 and Part C found four strategies that came close to passing. The bot fol
 - Live funding comes from Hyperliquid (hourly rates ×8 for the 8-hour comparison), because Binance futures data is blocked from US servers; the research used Binance funding, so funding levels and costs can differ a little.
 - Only coins in the bot's current top-50 list (plus BTC) can be picked at a rebalance. A held coin that has left the list is sold at the next rebalance, and it can be picked again once it is back in the list.
 - These two come from `factors.py` (Part C research) and use its own code. The summary shows how many coins each holds and the top names. The first summary after the update says "🔭 Now watching 4 near-miss strategies."
-- To switch everything off, put `"PAPER_WATCH": false` in the `BOT_SETTINGS` secret. Single strategies: `"WATCH_S6": false` or `"WATCH_S8": false`. Settings can be changed the same way, e.g. `"WATCH_S1": {"n": 55}` or `"WATCH_S5": {"k": 5}`.
+- **Blend of the 4 (S12):** each week, the 4 watches above are mixed with more weight on the calmer ones (1 ÷ their swings over the last 9 weeks), using edge_v2.py's own code. A week counts once all its parts have finished (about 2 weeks later). The first summary after the update says "🔭 Now watching 5 near-miss strategies (added the blend)."
+- To switch everything off, put `"PAPER_WATCH": false` in the `BOT_SETTINGS` secret. Single strategies: `"WATCH_S6": false`, `"WATCH_S8": false` or `"WATCH_S12": false`. Settings can be changed the same way, e.g. `"WATCH_S1": {"n": 55}` or `"WATCH_S5": {"k": 5}`.
 - **These are not tradeable. Both failed the Phase 3 honesty rules.**
 
 ## 3. Telegram messages
@@ -95,6 +98,9 @@ Phase 3 and Part C found four strategies that came close to passing. The bot fol
 | 💓 **BOT ALIVE** | hourly check-in: scans done, closest near-misses, data sources in use, open trades, records, AI status, unavailable coins |
 | 🤫 **Quiet mode on** | sent once when quiet mode starts |
 | 📅 **DAILY SUMMARY** | quiet mode only, once a day: paper trades opened and closed (WIN/LOSS with % after fees), best and worst trade, A/B scoreboard for the last 24 h and all time, open trades, and what the AI approved, rejected or found unclear |
+| 🚨 **CRASH WATCH** | a heads-up (also in quiet mode) when BTC or ETH fell 4%+ or another top-50 coin fell 12%+ in the last 60 minutes of closed 5-minute candles: the fall, the price now and the open-interest change ("many traders forced out" when it fell 5%+). Several coins in one message; the same coin again only after 6 h or a further full fall; at most 3 an hour. Heads-up only — not a trade signal |
+| 🚨 **MARKET-WIDE CRASH WATCH** | instead of the above when 15+ top-50 coins each fell 5%+ in 60 minutes: how many, and the biggest falls |
+| 📊 **WEEKLY RECAP** | Sundays at the daily-summary time (needs paper-watch on): the watched strategies ranked over 7 days and since they started, after fees, against just holding Bitcoin and USDT in Flexible Earn (beat both / one / neither), and the A/B scoreboard of the week. "(sent late)" if the bot was down (up to 24 h). Paper only |
 | 🚨 **BOT DOWN** | from the watchdog: no scan has finished for over 2 hours. Open Actions and check the latest run |
 
 Fees counted: LONG 0.10% each way (0.20% round trip), SHORT 0.05% each way (0.10%). A trade only counts as a win if it is positive after fees.
@@ -111,6 +117,19 @@ Open the file on GitHub → pencil icon → paste the new content → *Commit ch
 - **Encryption:** with `DATA_KEY` set, the bot's memory is stored as `state.json.enc` and every recorded data file as `.jsonl.gz.enc` (AES-256-GCM; the key is made from your passphrase plus the public salt in `datalock.salt`). On the first run with the key, the old `state.json` is converted and removed from the latest version. Older versions stay in git history, so they still show what was there before.
 - **Wrong key:** the bot never overwrites the locked file. It warns "⚠️ Can't unlock my memory — check the DATA_KEY secret" and keeps scanning.
 - **Hidden settings:** put tunables in the `BOT_SETTINGS` secret (keys: `A_MIN`, `B_MIN`, `SL_ATR`, `TP1_ATR`, `TP2_ATR`, `OB_PENALTY`, `COOLDOWN_S`, `MIN_TP1_FEE_MULT`, `MAX_HOLD_A_HOURS`, `MAX_HOLD_B_HOURS`, `TOP_N_COINS`, `EXCLUDE_COINS` (list), `USE_DERIV_SCORE`, `FEE_PCT_SPOT`, `FEE_PCT_FUTURES`, `STRATEGY` (object for future strategies)).
+- **Phase 6 settings** (also in `BOT_SETTINGS`):
+
+| key | default | what it does |
+|---|---|---|
+| `WATCH_S12` | `true` | paper-watch the blend of the 4 near misses (5th line of the 🔭 block) |
+| `EARN_APR` | `5.0` | yearly % for "🏦 USDT in Binance Flexible Earn" in the Sunday recap |
+| `CRASH_WATCH` | `true` | send 🚨 CRASH WATCH heads-ups (also in quiet mode) |
+| `CRASH_BIG_PCT` | `4` | BTC or ETH fall in 60 minutes that triggers a heads-up |
+| `CRASH_ALT_PCT` | `12` | fall in 60 minutes for any other top-50 coin |
+| `CRASH_MARKET_PCT` | `5` | fall per coin that counts towards a market-wide crash |
+| `CRASH_MARKET_COUNT` | `15` | how many top-50 coins must fall that much for one 🚨 MARKET-WIDE message |
+| `CRASH_OI_PCT` | `5` | open interest down this much in 1 h adds "many traders forced out" |
+
 - **Quiet public logs:** on GitHub, Actions logs show only health lines (cycle done, counts, push ok, source failures without details). No coins, prices, scores, AI replies or wallet addresses. For local debugging run with `LOG_DETAIL=1`.
 - **Private results:** backtest/research outputs (`backtest_report.md`, `research_report.md`, CSV/JSON results) are git-ignored. The earlier public backtest report was moved out of the repo into the ignored `private_reports/` folder.
 - **Reading encrypted files (research):** `DATA_KEY='your passphrase' python datalock.py decrypt FILE.jsonl.gz.enc > out.jsonl`. A wrong key or a changed file gives a clear error.
