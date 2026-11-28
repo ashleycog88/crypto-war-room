@@ -176,6 +176,10 @@ SETTINGS = {
     "FEE_PCT_FUTURES": ("c", "fee_fut", _num(0, 2)), "STRATEGY": ("c", "strategy", _obj),
     "PAPER_WATCH": ("c", "paper_watch", _bool), "WATCH_S1": ("c", "watch_s1", _obj), "WATCH_S5": ("c", "watch_s5", _obj),
     "WATCH_S6": ("c", "watch_s6", _bool), "WATCH_S8": ("c", "watch_s8", _bool),
+    "WATCH_S12": ("c", "watch_s12", _bool), "EARN_APR": ("c", "earn_apr", _num(0, 50)),
+    "CRASH_WATCH": ("c", "crash_watch", _bool), "CRASH_BIG_PCT": ("c", "crash_big", _num(0.5, 50)),
+    "CRASH_ALT_PCT": ("c", "crash_alt", _num(0.5, 80)), "CRASH_MARKET_PCT": ("c", "crash_market", _num(0.5, 50)),
+    "CRASH_MARKET_COUNT": ("c", "crash_count", _num(2, 300, True)), "CRASH_OI_PCT": ("c", "crash_oi", _num(0.1, 90)),
 }
 
 
@@ -241,7 +245,10 @@ class Config:
         self.healthcheck_url = env_str("HEALTHCHECK_URL")
         self.paper_watch = env_str("PAPER_WATCH", "1") != "0"
         self.watch_s1, self.watch_s5 = {}, {}
-        self.watch_s6 = self.watch_s8 = True
+        self.watch_s6 = self.watch_s8 = self.watch_s12 = True
+        self.earn_apr = 5.0
+        self.crash_watch = True
+        self.crash_big, self.crash_alt, self.crash_market, self.crash_count, self.crash_oi = 4.0, 12.0, 5.0, 15, 5.0
         self.msg_prefix = env_str("MSG_PREFIX")
         self.tg_max_sends = env_num("TG_MAX_SENDS", 0, int)
         self.repo_dir = env_str("GITHUB_WORKSPACE", os.path.dirname(os.path.abspath(__file__)))
@@ -2069,11 +2076,74 @@ class Bot:
             return
         extra = [recorder_line(self.recorder_status(now), now)] if self.cfg.recorder_status_url else []
         extra += self.paper_watch_lines(now) + [self.healthcheck_line()]
+        if self.cfg.crash_watch:
+            import crash_watch
+            extra.append(crash_watch.summary_line(self.state.get("crash"), now))
         if self.tg.send(format_daily_summary(self.state, now, extra=extra + self.privacy_lines())):  # not sent → retried next cycle
             self.state["last_daily_summary"] = key
             if self.state.get("paper_watch") and self.cfg.paper_watch:
-                self.state["paper_watch"]["announced"] = self.state["paper_watch"]["announced4"] = True
+                pw = self.state["paper_watch"]
+                pw["announced"] = pw["announced4"] = True
+                if "s12" in pw and self.cfg.watch_s12:
+                    pw["announced5"] = True
             self.save()
+
+    def crash_thresholds(self):
+        c = self.cfg
+        return {"big": c.crash_big, "alt": c.crash_alt, "market": c.crash_market, "count": c.crash_count, "oi": c.crash_oi}
+
+    def crash_check(self, market, prices, deriv_data, now):
+        """🚨 heads-up from this cycle's closed 5m candles (sent even in quiet mode; no outbox: old news is dropped)."""
+        if not self.cfg.crash_watch:
+            return
+        import crash_watch as cw
+        st = self.state.setdefault("crash", cw.new_state())
+        th, now_ms, falls, oi = self.crash_thresholds(), int(now * 1000), {}, {}
+        for sym in self.coins:
+            df = (market.get(sym) or {}).get("df5m")
+            r = cw.fall_60m(df[["ts", "open", "high", "low", "close"]].iloc[-cw.WINDOW:].to_numpy(), now_ms) \
+                if df is not None else None
+            if r is None:
+                continue
+            b = norm_base(sym)
+            falls[b] = r
+            d = deriv_data.get(b) or {}
+            x = oi_change(self.state["oi_snap"].get(b), now, d.get("oi"), d.get("src")) if d else None
+            if x is not None:
+                oi[b] = x
+        cw.fill_later(st, now, {norm_base(s): p for s, p in prices.items() if p})
+        res = cw.scan(st, now, falls, oi, th, [norm_base(s) for s in self.coins])
+        if not res:
+            return
+        text = cw.format_message(res[0], res[1], th, fmt_price, lambda b: esc(coin_name(b + "/USDT")), n_top=len(self.coins))
+        if self.tg.send(text):  # a failed send starts no cooldown: the next cycle tries again
+            cw.commit(st, res[0], res[1], now, th)
+            log(f"Crash watch sent ({res[0]}, {len(res[1])} coin(s))")
+        self.save()
+
+    def maybe_weekly_recap(self, now):
+        """📊 Sunday recap at the daily-summary time (also in non-quiet mode), at most once a week, ≤ 24 h late."""
+        if not self.cfg.paper_watch or not self.state.get("paper_watch"):  # the recap is about the watched strategies
+            return
+        import recap
+        d = recap.due(self.state.get("last_recap"), now, self.cfg.summary_time, self.cfg.summary_tz)
+        if not d:
+            return
+        key, late = d
+        at = recap.recap_slot(now, self.cfg.summary_time, self.cfg.summary_tz)[1]
+        if self.state["paper_watch"].get("started", 0) >= at:  # nothing was watched in that week yet
+            self.state["last_recap"] = key
+            self.save()
+            return
+        import paper_watch
+        px_at = recap.btc_prices(paper_watch.get_klines, now)
+        on = [k for k, v in (("s1", 1), ("s5", 1), ("s6", self.cfg.watch_s6), ("s8", self.cfg.watch_s8),
+                             ("s12", self.cfg.watch_s12)) if v] if self.cfg.paper_watch else []
+        text, _ = recap.build(self.state.get("paper_watch"), self.state["closed_trades"], at, px_at,
+                              self.cfg.earn_apr, late, on, f"week to Sunday {key}")  # windows end at the recap time
+        self.state["last_recap"] = key  # once per week: a failed send waits in the outbox
+        self.notify(text)
+        self.save()
 
     def maybe_chain(self, now):
         """At ~minute CHAIN_AT_MINUTE, queue the next war_room.yml run (GitHub's cron is unreliable)."""
@@ -2109,9 +2179,9 @@ class Bot:
             self.pw_thread = None
             if "state" in self.pw_box:
                 new, old = self.pw_box.pop("state"), self.state.get("paper_watch") or {}
-                for k in ("announced", "announced4"):  # the summary may have been sent meanwhile
+                for k in ("announced", "announced4", "announced5"):  # the summary may have been sent meanwhile
                     new[k] = bool(new.get(k) or old.get(k))
-                for fam in ("s6", "s8"):
+                for fam in ("s6", "s8", "s12"):
                     nf, of = new.get(fam, {}), old.get(fam, {})
                     fresh = nf.get("n_notes", 0) - of.get("n_notes", 0)
                     for note in (nf.get("notes", [])[-fresh:] if fresh > 0 else []):
@@ -2130,7 +2200,7 @@ class Bot:
             try:
                 box["state"] = paper_watch.update(snap, now, self.cfg.watch_s1, self.cfg.watch_s5,
                                                   top=[c.split("/")[0] for c in self.coins],
-                                                  s6=self.cfg.watch_s6, s8=self.cfg.watch_s8)
+                                                  s6=self.cfg.watch_s6, s8=self.cfg.watch_s8, s12=self.cfg.watch_s12)
             except Exception as e:
                 box["error"] = type(e).__name__
         self.pw_box = box
@@ -2142,7 +2212,10 @@ class Bot:
             return []
         import paper_watch
         try:
-            lines = paper_watch.summary_lines(self.state["paper_watch"], now, coin_name)
+            st = self.state["paper_watch"]
+            if not self.cfg.watch_s12 and "s12" in st:
+                st = {k: v for k, v in st.items() if k != "s12"}
+            lines = paper_watch.summary_lines(st, now, coin_name)
         except Exception as e:  # a bad watch state must never block the daily summary
             log(f"Paper-watch summary skipped: {type(e).__name__}")
             return []
@@ -2185,6 +2258,7 @@ class Bot:
         self._safe("guide message", self.maybe_guide)
         self._safe("quiet notice", self.maybe_quiet_notice)
         self._safe("daily summary", self.maybe_daily_summary, now)
+        self._safe("weekly recap", self.maybe_weekly_recap, now)
         self._safe("lock warning", self.maybe_lock_warning)
         self._safe("paper watch", self.maybe_paper_watch, now)
         scan = list(dict.fromkeys(self.coins + [t["symbol"] for t in self.state["active_trades"]]))
@@ -2198,8 +2272,13 @@ class Bot:
                 log(f"Price fetch failed on {src.name}: {err_text(e)}")
                 prices = {}
             market = self.fetch_market(src, avail, now_ms)
+            try:  # crash watch first (latency): open interest only if it arrives within 10 s
+                early = dfut.result(timeout=10)[0]
+            except Exception:
+                early = {}
+            self._safe("crash watch", self.crash_check, market, prices, early, now)
             try:
-                deriv_data, self.deriv_used = dfut.result(timeout=40)
+                deriv_data, self.deriv_used = dfut.result(timeout=30)
             except Exception as e:
                 log(f"Derivatives fetch error: {err_text(e)}")
                 deriv_data, self.deriv_used = {}, None

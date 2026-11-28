@@ -46,3 +46,10 @@ Phase 1 build brief: harden the Crypto War Room bot (Python, GitHub Actions, Tel
 - edge_data.py: Binance archives 2020-01→2026-11 (spot 1h 593 USDT pairs incl. delisted, perp 1h + funding 918, 5m for PIT majors months), Hyperliquid funding top-up for Nov 2026, monthly point-in-time majors/top50 sets (82 months, 0 PIT violations, Q-51 missing 0), relaunch/redenomination splits. Cache backtest_data/edge_v2 (~0.8 GB, gitignored).
 - edge_v2.py: rolling walk-forward PASS v2 (11 unseen windows), old Phase 3 rule side by side, S1/S5/S6/S8 re-judged, S9 AdaptiveTrend, S10 vol-spike, S11 carry, S12 blend; 43 settings; report private_reports/edge_v2/.
 - Result: NOTHING passed PASS v2 → Part D not built; live bot/workflows/state untouched. Tests 219 green 3×; testing agent iterations 15–16.
+
+## 2026-11 — Phase 6 (blend paper-watch, weekly recap, crash watch)
+- paper_watch.py: S12 blend (edge_v2.weekly/blend, weeks final after 7 d + 6 h, part history stored; S1 weekly sums wk_net; tot_net migration); "🔭 Now watching 5 …" once; WATCH_S12.
+- recap.py + Bot.maybe_weekly_recap: Sunday 📊 WEEKLY RECAP at the summary time, vs BTC hold and Flexible Earn (EARN_APR), A/B scoreboard, once a week via outbox, "(sent late)" ≤ 24 h.
+- crash_watch.py + Bot.crash_check: 🚨 CRASH WATCH / MARKET-WIDE (quiet mode too), OI label, 6 h cooldown, 3/hour cap, 300 events with later prices, daily-summary line; CRASH_* settings.
+- crash_replay.py: 2026 replay — old 3%/10% defaults exceeded 30/month (max 43); defaults now CRASH_BIG_PCT 4, CRASH_ALT_PCT 12 → max 21/month (125 total).
+- Tests 246 green 3×; testing agent iterations 17–19.

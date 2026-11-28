@@ -38,6 +38,9 @@ A free, always-on, fail-safe Python bot on GitHub Actions that scans the top 50 
 | F-27 | Strategy research lab: test several pre-registered strategy families on 1h/4h/daily candles over ~2 years, honest walk-forward, random-entry baseline, futures-fee and spot-buy-fee models; plain report | Trader | 3 |
 | F-28 | Edge Hunt v2: ≈ 6-year point-in-time history, rolling walk-forward "PASS v2", re-judge near misses, new 2026 literature families (S9–S12) | Trader | 5 |
 | F-29 | Auto paper-watch for anything that passes + daily "real-money readiness" line (✅ ready / ⚠️ not ready) | Trader | 5 |
+| F-30 | Paper-watch the S12 near-miss blend (5th watched strategy) | Trader | 6 |
+| F-31 | Sunday weekly recap ranking watched strategies vs holding Bitcoin and USDT Flexible Earn | Trader | 6 |
+| F-32 | Crash watch: live Telegram heads-up on sudden crashes / forced-out traders, events saved for research | Trader | 6 |
 
 ## Phases
 - Phase 1 → working, hardened live bot on Binance data, top 50 coins, temporary hold times A 24h / B 4h (configurable), verified offline + real Telegram test messages → F-1..F-19, F-25
@@ -74,6 +77,9 @@ A free, always-on, fail-safe Python bot on GitHub Actions that scans the top 50 
 - Phase 5 → Edge Hunt v2 (user 2026-11-29: "you are the boss, make it formidable and earn real money"; full delegation): ≈ 6-year Binance history (2020→2026) with point-in-time coin sets, rolling walk-forward (18-month look-back → 6-month unseen, ≈ 9 windows, "PASS v2"), re-judge S1/S5/S6/S8, new families S9 AdaptiveTrend (arXiv 2602.11708), S10 volatility-spike bounce (kquant.app), S11 selective funding carry vs USDT-earn benchmark, S12 near-miss blend; anything that passes → quiet paper-watch + "real-money readiness" line; nothing passes → live bot unchanged → F-28, F-29
   - [phase5/requirement.md](phase5/requirement.md), [phase5/journeys.md](phase5/journeys.md)
   - Parked with reasons: cascade-fade 1–3 min scalper (needs auto execution), 21–23 UTC seasonality, pairs trading, ETF-flow signal.
+  - Status 2026-11-29: DONE — NOTHING passed PASS v2 (11 unseen windows 2021-07→2026-11). Closest S12 blend +43.8%, PF 1.23, 7/11 windows (8 needed), latest 12 m −4.0%. S9 paper period −48.1% / post-paper −9.2%. S11 carry 1.8% APR vs 5.0% Flexible Earn. Part D not built; live bot unchanged; 219 tests ×3; independent retest iter 15–16 clean. Not yet saved to GitHub (saved together with Phase 6).
+- Phase 6 → S12 blend paper-watch + Sunday "📊 WEEKLY RECAP" (vs holding BTC and USDT Flexible Earn 5%) + live "🚨 CRASH WATCH" heads-up (BTC/ETH −3%/60 min, other top-50 −10%, market-wide ≥ 15 coins −5%, OI drop = "many traders forced out"; sent even in quiet mode) → F-30, F-31, F-32
+  - [phase6/requirement.md](phase6/requirement.md), [phase6/journeys.md](phase6/journeys.md)
 
 ## UI/UX Rules
 - The only "UI" is Telegram messages (and reports relayed in chat). HTML-formatted, every dynamic value escaped, emojis kept.
