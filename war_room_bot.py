@@ -175,6 +175,7 @@ SETTINGS = {
     "USE_DERIV_SCORE": ("c", "use_deriv", _bool), "FEE_PCT_SPOT": ("c", "fee_spot", _num(0, 2)),
     "FEE_PCT_FUTURES": ("c", "fee_fut", _num(0, 2)), "STRATEGY": ("c", "strategy", _obj),
     "PAPER_WATCH": ("c", "paper_watch", _bool), "WATCH_S1": ("c", "watch_s1", _obj), "WATCH_S5": ("c", "watch_s5", _obj),
+    "WATCH_S6": ("c", "watch_s6", _bool), "WATCH_S8": ("c", "watch_s8", _bool),
 }
 
 
@@ -240,6 +241,7 @@ class Config:
         self.healthcheck_url = env_str("HEALTHCHECK_URL")
         self.paper_watch = env_str("PAPER_WATCH", "1") != "0"
         self.watch_s1, self.watch_s5 = {}, {}
+        self.watch_s6 = self.watch_s8 = True
         self.msg_prefix = env_str("MSG_PREFIX")
         self.tg_max_sends = env_num("TG_MAX_SENDS", 0, int)
         self.repo_dir = env_str("GITHUB_WORKSPACE", os.path.dirname(os.path.abspath(__file__)))
@@ -2070,7 +2072,7 @@ class Bot:
         if self.tg.send(format_daily_summary(self.state, now, extra=extra + self.privacy_lines())):  # not sent → retried next cycle
             self.state["last_daily_summary"] = key
             if self.state.get("paper_watch") and self.cfg.paper_watch:
-                self.state["paper_watch"]["announced"] = True
+                self.state["paper_watch"]["announced"] = self.state["paper_watch"]["announced4"] = True
             self.save()
 
     def maybe_chain(self, now):
@@ -2107,7 +2109,13 @@ class Bot:
             self.pw_thread = None
             if "state" in self.pw_box:
                 new, old = self.pw_box.pop("state"), self.state.get("paper_watch") or {}
-                new["announced"] = bool(new.get("announced") or old.get("announced"))  # summary may have run meanwhile
+                for k in ("announced", "announced4"):  # the summary may have been sent meanwhile
+                    new[k] = bool(new.get(k) or old.get(k))
+                for fam in ("s6", "s8"):
+                    nf, of = new.get(fam, {}), old.get(fam, {})
+                    fresh = nf.get("n_notes", 0) - of.get("n_notes", 0)
+                    for note in (nf.get("notes", [])[-fresh:] if fresh > 0 else []):
+                        log(f"Paper-watch {fam.upper()}: {note}")
                 self.state["paper_watch"] = new
                 self.save()
             else:
@@ -2120,7 +2128,9 @@ class Bot:
 
         def work():
             try:
-                box["state"] = paper_watch.update(snap, now, self.cfg.watch_s1, self.cfg.watch_s5)
+                box["state"] = paper_watch.update(snap, now, self.cfg.watch_s1, self.cfg.watch_s5,
+                                                  top=[c.split("/")[0] for c in self.coins],
+                                                  s6=self.cfg.watch_s6, s8=self.cfg.watch_s8)
             except Exception as e:
                 box["error"] = type(e).__name__
         self.pw_box = box

@@ -36,6 +36,22 @@ Phase 3 found no strategy that passes. User chose BOTH: (A) quietly paper-watch 
 - REQ-432 [always] The report (private_reports/, gitignored) shall start with a ≤ 6-line plain summary and end with a plain recommendation.
 - REQ-433 [always] The research shall not change live bot behaviour (except Part A), workflows or state; full test suite green.
 
+## Part C — New research families from the literature scan (2026-11-28)
+Sources found: Fieberg et al., "A Trend Factor for the Cross Section of Cryptocurrency Returns" (JFQA 2024, CTREND: persistent in large liquid coins, profitable after costs with ≤ monthly rebalancing); volatility-managed crypto momentum (Financial Markets and Portfolio Management 2025: scaling by trailing 4–12-week realized vol cuts momentum crashes); cross-sectional funding factor (long low-funding / short high-funding perps: modest persistent edge while level cash-and-carry decayed to ≈2.9% APR in 2026). Also multiple 2026 studies report that copying top Hyperliquid wallets does NOT persist after delay and fees (C1 prior: likely fail).
+
+- REQ-440 [always] S6 cross-sectional funding factor: weekly, rank Binance-listed perps (majors and top-50 sets) by trailing 7-day average funding; long the lowest-funding third, short the highest-funding third, equal weight, market-neutral; futures fees, slippage and actual funding paid/received.
+- REQ-441 [always] S7 CTREND-style trend factor: compute the paper's family of price/volume trend signals (moving-average ratios across horizons, volume-based signals) on daily candles, combine them using only past data (rolling cross-sectional regression or rank average — pre-registered, documented), and form long-only top-quintile (spot fees) and long-short (futures fees) portfolios with weekly and monthly rebalancing.
+- REQ-442 [always] S8 volatility-managed momentum: the S5 momentum portfolio (and a long-short variant) scaled each rebalance by target_vol ÷ trailing realized portfolio vol (windows 4 and 12 weeks), exposure capped at 1.0 for long-only.
+- REQ-443 [always] S6–S8 shall use the same PASS rules (REQ-430 with "≥ 20 rebalances" for portfolio strategies), training/unseen split as Phase 3, random-portfolio baselines matched on turnover and exposure, the 1.5× cost stress, and ≤ 12 pre-registered combinations each, all listed.
+- REQ-444 [always] The report shall cite each source paper/article next to its family and state where our implementation differs from the paper.
+- REQ-445 [always] Nothing from Part C shall be added to the live bot unless it PASSES and the user approves (keep the live bot simple — "don't confuse the bot").
+
+## Part D — Paper-watch the Part C near misses (user approved 2026-11-28)
+- REQ-450 [always] Paper-watch shall also track S6 top-50 cross-sectional funding factor and S8 top-50 volatility-managed momentum, with the settings picked on training in Part C, imported from factors.py (no copy), futures model for S6 and spot model for S8.
+- REQ-451 [always] The daily summary "🔭 Watching" block shall show all 4 watched strategies with holdings (count + top names for portfolios), 24 h changes, net result after fees since watch start and days watched; the first summary after this update says "🔭 Now watching 4 near-miss strategies."
+- REQ-452 [always] S6/S8 updates shall run in the same background updater (no main-cycle slowdown), persist in the encrypted state, be switchable via BOT_SETTINGS (WATCH_S6, WATCH_S8), and match factors.py decisions on the same data.
+- REQ-453 [unwanted] If a portfolio coin has no data at a rebalance, then the watch shall handle it the same way factors.py does and log the reason (health-only in Actions logs).
+
 ## Quality requirements
 ```
 Q-40 Tag: Trust.NoHindsightSelection

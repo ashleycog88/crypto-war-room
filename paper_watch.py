@@ -5,11 +5,15 @@ import copy
 import numpy as np
 import requests
 
+import factors as fx
 import research as rs
 
 BINANCE = "https://data-api.binance.vision"
 HL = "https://api.hyperliquid.xyz/info"
-DEFAULTS = {"s1": {"n": 20, "exit": "channel", "btc": True}, "s5": {"k": 3, "reb": "daily"}}
+DEFAULTS = {"s1": {"n": 20, "exit": "channel", "btc": True}, "s5": {"k": 3, "reb": "daily"},
+            "s6": {"look": 14, "q": 5}, "s8": {"variant": "long", "win": 84, "reb": 7}}  # Part C, training-picked
+PORT = {"s6": ("F", "Funding factor (top 50, long low / short high funding, futures)"),
+        "s8": ("S", "Vol-managed momentum (top 50, spot)")}
 FOUR_H, DAY = rs.TF["4h"], rs.TF["1d"]
 MARGIN_MS = 120_000  # wait 2 min after a candle closes before using it
 KEEP = 60
@@ -34,10 +38,16 @@ def params(over_s1=None, over_s5=None):
     return pick(DEFAULTS["s1"], over_s1), pick(DEFAULTS["s5"], over_s5)
 
 
+def port_state(now):
+    return {"started": int(now), "w": {}, "w_prev": {}, "d_t": 0, "equity": 1.0, "scale": 0.0, "last_day": 0,
+            "events": [], "notes": []}
+
+
 def new_state(now):
-    return {"started": int(now), "announced": False, "last_ok": 0,
+    return {"started": int(now), "announced": False, "announced4": False, "last_ok": 0,
             "s1": {"open": {}, "closed": [], "seen": {}, "free": {}, "tot_R": 0.0, "n": 0},
-            "s5": {"held": {}, "turn": 0.0, "equity": 1.0, "last_day": 0, "events": []}}
+            "s5": {"held": {}, "turn": 0.0, "equity": 1.0, "last_day": 0, "events": []},
+            "s6": port_state(now), "s8": port_state(now)}
 
 
 def due(st, now):
@@ -152,10 +162,95 @@ def s5_update(st, p, daily, nxt_open, start_ms, now):
         st["held"], st["last_day"] = new, int(days[d])
 
 
+# ---------------------------------------------------------------- S6 / S8: Part C portfolios (factors.py)
+def port_update(st, fam, daily, nxt_open, fund, now, eligible=None):
+    """factors.py's own decide() and period() on the same calendar rebalance days; one period closes per rebalance.
+    Decisions use only `eligible` coins (the current top 50); other fetched coins are only priced (held ones get sold)."""
+    p, (model, _) = DEFAULTS[fam], PORT[fam]
+    bases = [b for b in daily if nxt_open.get(b) is not None and len(daily[b])]
+    coins = []
+    for b in bases:
+        rows = np.vstack([daily[b], [[daily[b][-1, 0] + DAY, nxt_open[b], np.nan, np.nan, np.nan, np.nan]]])
+        c = WatchCoin(b, {"1d": rows}, fund.get(b))
+        c.fn = c.fr * 8  # Hyperliquid hourly rate → 8h-equivalent (what the S6 signal ranks)
+        coins.append(c)
+    mx = fx.matrices(coins)
+    elig = [i for i, b in enumerate(bases) if eligible is None or b in eligible]
+    dec_bases = [bases[i] for i in elig]
+    mx_dec = mx if len(elig) == len(bases) else fx.matrices([coins[i] for i in elig])
+    decide, step, _ = fx.s6_decide(mx_dec, p) if fam == "s6" else fx.s8_decide(mx_dec, p)
+    days, idx = mx["days"], {b: i for i, b in enumerate(bases)}
+    assert np.array_equal(days, mx_dec["days"])
+    start_ms = st["started"] * 1000
+    for d in range(len(days) - 1):
+        if not fx.is_reb(days, d, step) or days[d] <= st["last_day"] or days[d + 1] < start_ms:
+            continue
+        net = None
+        if st["d_t"]:
+            dp = int(np.searchsorted(days, st["d_t"]))
+            gone = sorted(b for b in st["w"] if b not in idx)
+            if gone:  # same as factors.py: a coin without data keeps its last price (no gain or loss here)
+                add_note(st, f"{bt_iso(days[d])}: no data for {', '.join(gone)}")
+            w = {idx[b]: v for b, v in st["w"].items() if b in idx}
+            w_old = {idx[b]: v for b, v in st["w_prev"].items() if b in idx}
+            net, _ = fx.period(mx, dp, d, w, w_old, model)
+            st["equity"] *= 1 + net / 100
+        L, S, scale, valid = decide(d)
+        left = len(dec_bases) - len(valid)
+        if left:
+            add_note(st, f"{bt_iso(days[d])}: {left} coin(s) without data left out")
+        out = sorted(b for b in st["w"] if b not in dec_bases)
+        if out:
+            add_note(st, f"{bt_iso(days[d])}: {', '.join(out)} left the top 50 — sold")
+        new = {dec_bases[x]: v for x, v in fx.weights(L, S, scale).items() if v}
+        st["events"] = (st["events"] + [{"t": int(days[d + 1]), "bought": sorted(set(new) - set(st["w"])),
+                                         "sold": sorted(set(st["w"]) - set(new)), "net_prev": net}])[-KEEP:]
+        st["w_prev"], st["w"], st["d_t"], st["last_day"], st["scale"] = st["w"], new, int(days[d]), int(days[d]), scale
+
+
+def port_due(ps, now, step=7):
+    """A weekly rebalance day has closed since the last one processed (avoids fetching 50 coins every update)."""
+    last_closed = (int(now * 1000) - MARGIN_MS) // DAY * DAY - DAY  # open time of the latest closed daily candle
+    k = (last_closed - fx.ANCHOR) // (step * DAY)
+    return fx.ANCHOR + k * step * DAY > max(ps["last_day"], ps["started"] * 1000 - DAY)
+
+
+def bt_iso(t):
+    return rs.bt.iso(int(t))[:10]
+
+
+def port_funding(bases, start_ms):
+    """Hyperliquid hourly funding per coin (HL lists 1000-unit coins as kPEPE etc.); most coins must answer."""
+    out, bad = {}, 0
+    for b in bases:
+        for name in (b, "k" + b):
+            try:
+                ft, fr = get_funding(name, start_ms)
+            except Exception:
+                ft = fr = None
+            if ft is not None and len(ft):
+                out[b] = (ft, fr)
+                break
+        else:
+            bad += 1
+    if bad > len(bases) // 2:
+        raise RuntimeError("funding unavailable")
+    return out
+
+
 # ---------------------------------------------------------------- one update (runs off the main cycle)
-def update(st, now, over_s1=None, over_s5=None, coins=None):
-    """Returns the new paper-watch state; raises if any fetch fails (the caller keeps the old state)."""
+def add_note(ps, text):
+    """Notes are capped at KEEP; n_notes counts every note so the bot can log only the new ones."""
+    ps["notes"] = (ps["notes"] + [text])[-KEEP:]
+    ps["n_notes"] = ps.get("n_notes", 0) + 1
+
+
+def update(st, now, over_s1=None, over_s5=None, coins=None, top=None, s6=True, s8=True):
+    """Returns the new paper-watch state; raises if any S1/S5 fetch fails (the caller keeps the old state).
+    S6/S8 problems only skip S6/S8 for this update (their old state is kept, with a note)."""
     st = copy.deepcopy(st) if st else new_state(now)
+    for fam in ("s6", "s8"):
+        st.setdefault(fam, port_state(now))
     p1, p5 = params(over_s1, over_s5)
     coins = coins or rs.MAJORS
     start_ms = st["started"] * 1000
@@ -165,6 +260,36 @@ def update(st, now, over_s1=None, over_s5=None, coins=None):
         daily[b], nxt[b] = get_klines(b, "1d", 120, now)
     s1_update(st["s1"], p1, bars4, get_funding, start_ms, now)
     s5_update(st["s5"], p5, daily, nxt, start_ms, now)
+    due = [f for f, on in (("s8", s8), ("s6", s6)) if on and port_due(st[f], now)]
+    if due:
+        # the bot's list + coins still held (a coin leaving the top 50 is still priced and sold), BTC always
+        held = {b for f in due for b in list(st[f]["w"]) + list(st[f]["w_prev"])}
+        names = list(dict.fromkeys(["BTC"] + list(top or []) + sorted(held)))
+        d50, n50, failed = {}, {}, []
+        for b in names:
+            try:
+                d50[b], n50[b] = get_klines(b, "1d", 400, now)
+            except Exception:
+                failed.append(b)
+        for fam in due:
+            old = copy.deepcopy(st[fam])
+            try:
+                if "BTC" not in d50:
+                    raise RuntimeError("no BTC candles")
+                fund = {}
+                if fam == "s6":  # funding from 14 + 2 days before the earliest pending rebalance (catch-up safe)
+                    first = (st[fam]["d_t"] + 7 * DAY) if st[fam]["d_t"] else st[fam]["started"] * 1000 - DAY
+                    back = first - (DEFAULTS["s6"]["look"] + 2) * DAY
+                    if back < now * 1000 - 200 * DAY:
+                        back = now * 1000 - 200 * DAY
+                        add_note(st[fam], "funding history limited to 200 days (long outage); old catch-up signals may be short")
+                    fund = port_funding(list(d50), back)
+                port_update(st[fam], fam, d50, n50, fund, now, (set(top) | {"BTC"}) if top else None)  # BTC: regime
+                if failed:
+                    add_note(st[fam], f"no Binance candles for {', '.join(failed[:5])}")
+            except Exception as e:
+                st[fam] = old
+                add_note(st[fam], f"update skipped ({type(e).__name__}); positions kept")
     st["last_ok"] = int(now)
     return st
 
@@ -176,7 +301,7 @@ def summary_lines(st, now, coin_name=str):
     since_ms = (now - 86400) * 1000
     s1, s5 = st["s1"], st["s5"]
     day = int((now - st["started"]) // 86400) + 1
-    out = [] if st["announced"] else ["🔭 Started watching 2 near-miss strategies today."]
+    out = [] if st.get("announced4") else ["🔭 Now watching 4 near-miss strategies."]
     out.append(f"🔭 <b>Watching (paper, not tradeable yet)</b> — day {day}")
     longs = {b: v for b, v in s1["open"].items() if v.get("side", "LONG") == "LONG"}
     opened = sum(1 for v in longs.values() if v["entry_t"] > since_ms) + \
@@ -193,6 +318,26 @@ def summary_lines(st, now, coin_name=str):
              if s5["events"] else "nothing yet (first rebalance after the next daily close)")
     out.append(f"  • Top-3 momentum (majors, spot): holding {hold5} · 24 h: {len(ev)} rebalance(s)"
                + (f" ({chg})" if chg else "") + f" · since start: {(s5['equity'] - 1) * 100:+.2f}% after fees")
+    for fam, (_, name) in PORT.items():
+        ps = st.get(fam)
+        if not ps:
+            continue
+        lo, sh = sorted((b for b, v in ps["w"].items() if v > 0), key=lambda b: -ps["w"][b]), \
+            [b for b, v in ps["w"].items() if v < 0]
+        top_names = lambda xs: ", ".join(coin_name(b) for b in sorted(xs)[:3]) + (" …" if len(xs) > 3 else "")
+        if not ps["events"]:
+            hold = "nothing yet (first rebalance after the next weekly close)"
+        elif not ps["w"]:
+            hold = "cash (0% exposure)" if fam == "s8" else "cash"
+        elif sh:
+            hold = f"long {len(lo)} ({top_names(lo)}) · short {len(sh)} ({top_names(sh)})"
+        else:
+            hold = f"{len(lo)} coins at {ps['scale'] * 100:.0f}% exposure ({top_names(lo)})"
+        ev = [e for e in ps["events"] if e["t"] > since_ms]
+        chg = f"rebalanced (bought {len(ev[-1]['bought'])}, sold {len(ev[-1]['sold'])})" if ev else "no rebalance"
+        pday = int((now - ps["started"]) // 86400) + 1
+        out.append(f"  • {name}: {hold} · 24 h: {chg} · since start: {(ps['equity'] - 1) * 100:+.2f}% after fees"
+                   f" · day {pday}")
     if st["last_ok"] and now - st["last_ok"] > 8 * 3600:
         out.append(f"  ⚠️ Watch data not updated for {int((now - st['last_ok']) // 3600)} h (positions kept)")
     return out
